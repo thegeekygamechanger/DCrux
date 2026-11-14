@@ -1,0 +1,20 @@
+DCrux
+Copyright 2026 Harsh Kumar
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It bundles or depends on the following third-party work:
+
+- Kotlin, kotlinx.coroutines, kotlinx.serialization (JetBrains) - Apache License 2.0
+- Jetpack Compose, Material 3 and AndroidX libraries (The Android Open Source Project) - Apache License 2.0
+- Material Icons (Google) - Apache License 2.0
+- OkHttp and Okio (Square, Inc.) - Apache License 2.0
+- Coil (Coil Contributors) - Apache License 2.0
+- jsoup (Jonathan Hedley) - MIT License
+- Inter typeface (The Inter Project Authors) - SIL Open Font License 1.1, see licenses/Inter-OFL.txt
+- TeX Gyre Heros typeface (GUST e-foundry) - GUST Font License, see licenses/GUST-FONT-LICENSE.txt
+- ISRG Root X1 certificate (Internet Security Research Group)
+
+DCrux uses, but does not include, these services, each under its own terms:
+YouTube IFrame Player (Google LLC), the Claude API (Anthropic), and the public
+news feeds of the publishers listed in the app. News content belongs to its publishers.

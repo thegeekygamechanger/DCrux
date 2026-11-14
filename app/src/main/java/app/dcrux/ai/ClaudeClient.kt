@@ -1,0 +1,240 @@
+package app.dcrux.ai
+
+import app.dcrux.data.AppJson
+import app.dcrux.data.ModelInfo
+import app.dcrux.net.Http
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.coroutineContext
+
+class ClaudeException(val kind: Kind, message: String, val status: Int = 0, val retryAfterSec: Int = 0) : Exception(message) {
+    enum class Kind {
+        NO_KEY, AUTH, BILLING, PERMISSION, NOT_FOUND, RATE_LIMIT, OVERLOADED, BAD_REQUEST, TOO_LARGE,
+        SERVER, NETWORK, REFUSAL, TRUNCATED, PARSE
+    }
+
+    /** Plain words for the UI. */
+    val friendly: String
+        get() = when (kind) {
+            Kind.NO_KEY -> "No AI key is set."
+            Kind.AUTH -> "The AI key was rejected. Check that it is valid and active."
+            Kind.BILLING -> "The AI account has a billing problem (credits or payment)."
+            Kind.PERMISSION -> "This API key is not allowed to do that."
+            Kind.NOT_FOUND -> "That model is not available for this API key."
+            Kind.RATE_LIMIT -> "Rate limit reached. Try again in a little while."
+            Kind.OVERLOADED -> "The AI is busy right now. Try again shortly."
+            Kind.TOO_LARGE -> "This is too long to send in one request."
+            Kind.SERVER -> "The AI service had a problem. Try again."
+            Kind.NETWORK -> "No connection to the AI service. Check the internet and try again."
+            Kind.REFUSAL -> "The AI declined to process this content."
+            Kind.TRUNCATED -> "The answer was cut off before it finished. Try again."
+            Kind.PARSE -> "The answer came back in an unexpected shape. Try again."
+            Kind.BAD_REQUEST -> message ?: "The request was not accepted."
+        }
+}
+
+data class Completion(val text: String, val model: String)
+
+/**
+ * Talks to the Claude Messages API directly over HTTPS from the phone.
+ * (The official Java SDK depends on Jackson 2.19, which needs Android 8+; DCrux supports Android 7.)
+ */
+class ClaudeClient {
+    private val json = "application/json".toMediaType()
+
+    private fun base(url: String, apiKey: String, beta: String?) = Request.Builder().url(url)
+        .header("x-api-key", apiKey)
+        .header("anthropic-version", VERSION)
+        .apply { if (beta != null) header("anthropic-beta", beta) }
+
+    /** Lists the models this key can use, with the capabilities DCrux adapts to. Doubles as the key test. */
+    suspend fun listModels(apiKey: String): List<ModelInfo> = withContext(Dispatchers.IO) {
+        val out = mutableListOf<ModelInfo>()
+        var after: String? = null
+        var beta: String? = FALLBACK_BETA
+        while (true) {
+            val url = "$BASE/v1/models?limit=100" + (after?.let { "&after_id=$it" } ?: "")
+            val res = execute(base(url, apiKey, beta).get().build())
+            val body = res.use { r ->
+                val text = r.body.string()
+                if (r.code == 400 && beta != null) null
+                else if (!r.isSuccessful) throw httpError(r, text)
+                else text
+            }
+            if (body == null) { beta = null; continue }
+            val root = AppJson.parseToJsonElement(body).jsonObject
+            for (el in root["data"]?.jsonArray.orEmpty()) {
+                val m = el.jsonObject
+                val id = m["id"]?.jsonPrimitive?.content ?: continue
+                val caps = m["capabilities"] as? JsonObject
+                val effort = caps?.get("effort") as? JsonObject
+                out += ModelInfo(
+                    id = id,
+                    name = m["display_name"]?.jsonPrimitive?.content ?: id,
+                    maxTokens = m["max_tokens"]?.jsonPrimitive?.intOrNull ?: 16000,
+                    structured = (caps?.get("structured_outputs") as? JsonObject)?.get("supported")?.jsonPrimitive?.booleanOrNull ?: false,
+                    efforts = EFFORTS.filter { (effort?.get(it) as? JsonObject)?.get("supported")?.jsonPrimitive?.booleanOrNull == true },
+                    fallbacks = (m["allowed_fallback_models"] as? kotlinx.serialization.json.JsonArray)?.isNotEmpty() == true,
+                )
+            }
+            after = if (root["has_more"]?.jsonPrimitive?.booleanOrNull == true) root["last_id"]?.jsonPrimitive?.content else null
+            if (after == null) break
+        }
+        out
+    }
+
+    /**
+     * One streamed request. [schema] constrains the answer to JSON on models that support
+     * structured outputs; [onText] receives the text so far as it grows.
+     */
+    suspend fun complete(
+        apiKey: String,
+        model: ModelInfo,
+        system: String,
+        user: String,
+        schema: JsonObject? = null,
+        effort: String = "low",
+        maxTokens: Int = 16000,
+        onText: (String) -> Unit = {},
+    ): Completion = withContext(Dispatchers.IO) {
+        val useSchema = schema != null && model.structured
+        val body = buildJsonObject {
+            put("model", model.id)
+            put("max_tokens", minOf(maxTokens, model.maxTokens))
+            put("stream", true)
+            put("system", system)
+            put("messages", buildJsonArray {
+                add(buildJsonObject {
+                    put("role", "user")
+                    put(
+                        "content",
+                        if (schema != null && !useSchema)
+                            "$user\n\nReply with one JSON object only, matching this JSON Schema:\n$schema"
+                        else user
+                    )
+                })
+            })
+            if (useSchema || effort in model.efforts) {
+                putJsonObject("output_config") {
+                    if (effort in model.efforts) put("effort", effort)
+                    if (useSchema) putJsonObject("format") {
+                        put("type", "json_schema")
+                        put("schema", schema!!)
+                    }
+                }
+            }
+            // If a safety classifier declines, let the API retry on its recommended model.
+            if (model.fallbacks) put("fallbacks", "default")
+        }
+        val req = base("$BASE/v1/messages", apiKey, if (model.fallbacks) FALLBACK_BETA else null)
+            .post(body.toString().toRequestBody(json)).build()
+        val call = Http.streaming.newCall(req)
+        val handle = coroutineContext.job.invokeOnCompletion { if (it != null) call.cancel() }
+        try {
+            val res = try { call.execute() } catch (e: IOException) {
+                coroutineContext.ensureActive()
+                throw ClaudeException(ClaudeException.Kind.NETWORK, e.message ?: "network")
+            }
+            res.use { r ->
+                if (!r.isSuccessful) throw httpError(r, r.body.string())
+                val sb = StringBuilder()
+                var stop: String? = null
+                var served = model.id
+                val src = r.body.source()
+                try {
+                    while (true) {
+                        val line = src.readUtf8Line() ?: break
+                        if (!line.startsWith("data:")) continue
+                        val ev = runCatching { AppJson.parseToJsonElement(line.substring(5).trim()).jsonObject }.getOrNull() ?: continue
+                        when (ev["type"]?.jsonPrimitive?.content) {
+                            "message_start" -> ev["message"]?.jsonObject?.get("model")?.jsonPrimitive?.content?.let { served = it }
+                            "content_block_start" -> {
+                                // A fallback block marks a switch of model: drop the declined model's partial text.
+                                if (ev["content_block"]?.jsonObject?.get("type")?.jsonPrimitive?.content == "fallback") {
+                                    sb.setLength(0)
+                                    ev["content_block"]?.jsonObject?.get("to")?.jsonObject?.get("model")?.jsonPrimitive?.content?.let { served = it }
+                                }
+                            }
+                            "content_block_delta" -> {
+                                val d = ev["delta"]?.jsonObject
+                                if (d?.get("type")?.jsonPrimitive?.content == "text_delta") {
+                                    sb.append(d["text"]?.jsonPrimitive?.content.orEmpty())
+                                    onText(sb.toString())
+                                }
+                            }
+                            "message_delta" -> ev["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.let { if (it.isString) stop = it.content }
+                            "error" -> {
+                                val err = ev["error"]?.jsonObject
+                                throw typeError(err?.get("type")?.jsonPrimitive?.content.orEmpty(), err?.get("message")?.jsonPrimitive?.content ?: "error", 0, 0)
+                            }
+                        }
+                    }
+                } catch (e: IOException) {
+                    coroutineContext.ensureActive()
+                    throw ClaudeException(ClaudeException.Kind.NETWORK, e.message ?: "stream interrupted")
+                }
+                when (stop) {
+                    "refusal" -> throw ClaudeException(ClaudeException.Kind.REFUSAL, "refusal")
+                    "max_tokens" -> throw ClaudeException(ClaudeException.Kind.TRUNCATED, "max_tokens")
+                    null -> throw ClaudeException(ClaudeException.Kind.NETWORK, "The stream ended early")
+                }
+                Completion(sb.toString(), served)
+            }
+        } finally {
+            handle.dispose()
+        }
+    }
+
+    private fun execute(req: Request): Response = try {
+        Http.client.newCall(req).execute()
+    } catch (e: IOException) {
+        throw ClaudeException(ClaudeException.Kind.NETWORK, e.message ?: "network")
+    }
+
+    private fun httpError(r: Response, body: String): ClaudeException {
+        val err = runCatching { AppJson.parseToJsonElement(body).jsonObject["error"]?.jsonObject }.getOrNull()
+        val type = err?.get("type")?.jsonPrimitive?.content.orEmpty()
+        val msg = err?.get("message")?.jsonPrimitive?.content ?: "HTTP ${r.code}"
+        return typeError(type, msg, r.code, r.header("retry-after")?.toIntOrNull() ?: 0)
+    }
+
+    private fun typeError(type: String, msg: String, status: Int, retryAfter: Int): ClaudeException {
+        val kind = when {
+            status == 401 || type == "authentication_error" -> ClaudeException.Kind.AUTH
+            status == 402 || type == "billing_error" -> ClaudeException.Kind.BILLING
+            status == 403 || type == "permission_error" -> ClaudeException.Kind.PERMISSION
+            status == 404 || type == "not_found_error" -> ClaudeException.Kind.NOT_FOUND
+            status == 413 || type == "request_too_large" -> ClaudeException.Kind.TOO_LARGE
+            status == 429 || type == "rate_limit_error" -> ClaudeException.Kind.RATE_LIMIT
+            status == 529 || type == "overloaded_error" -> ClaudeException.Kind.OVERLOADED
+            status == 400 || type == "invalid_request_error" -> ClaudeException.Kind.BAD_REQUEST
+            else -> ClaudeException.Kind.SERVER
+        }
+        return ClaudeException(kind, msg, status, retryAfter)
+    }
+
+    companion object {
+        const val BASE = "https://api.anthropic.com"
+        const val VERSION = "2026-10-21"
+        const val FALLBACK_BETA = "server-side-fallback-2026-07-01"
+        val EFFORTS = listOf("low", "medium", "high", "xhigh", "max")
+    }
+}

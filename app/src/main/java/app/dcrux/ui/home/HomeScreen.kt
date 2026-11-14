@@ -1,0 +1,382 @@
+package app.dcrux.ui.home
+
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import app.dcrux.MainActivity
+import app.dcrux.data.Channel
+import app.dcrux.data.Dates
+import app.dcrux.data.Quotes
+import app.dcrux.data.Settings
+import app.dcrux.data.Video
+import app.dcrux.graph
+import app.dcrux.net.OpenImage
+import app.dcrux.ui.LocalNav
+import app.dcrux.ui.Screen
+import app.dcrux.ui.components.AnimatedLogo
+import app.dcrux.ui.components.CruxCard
+import app.dcrux.ui.components.EmptyState
+import app.dcrux.ui.components.PaginationBar
+import app.dcrux.ui.components.RelevancePill
+import app.dcrux.ui.components.Tag
+import app.dcrux.ui.theme.BrandColors
+import app.dcrux.ui.theme.Heros
+import coil3.compose.AsyncImage
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun HomeTab(settings: Settings, activity: MainActivity) {
+    val context = LocalContext.current
+    val g = context.graph
+    val nav = LocalNav.current
+    val scope = rememberCoroutineScope()
+    val sync by g.sync.state.collectAsState()
+    val channels by g.db.channels().observeAll().collectAsState(initial = null)
+    var shareMessage by remember { mutableStateOf<String?>(null) }
+    var askChannel by remember { mutableStateOf(false) }
+
+    if (askChannel) AlertDialog(
+        onDismissRequest = { askChannel = false },
+        title = { Text("Add a channel first") },
+        text = { Text("There is nothing to sync yet. Paste a YouTube channel or video link in Settings, or start with the default channel.") },
+        confirmButton = { Button(onClick = { askChannel = false; nav.openSettings() }) { Text("Add a channel") } },
+        dismissButton = { TextButton(onClick = { askChannel = false; g.sync.restoreDefault() }) { Text("Use the default") } },
+    )
+
+    // A link shared from the YouTube app lands here and is synced straight away.
+    LaunchedEffect(activity.sharedText.value) {
+        activity.sharedText.value?.let { shared ->
+            activity.sharedText.value = null
+            shareMessage = "Adding the shared link"
+            val report = g.sync.addLinks(shared)
+            shareMessage = when {
+                report.added.isNotEmpty() -> "Added " + report.added.joinToString(", ")
+                else -> report.failed.firstOrNull()?.second ?: "Could not add that link"
+            }
+        }
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item("bar") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AnimatedLogo(46.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("DCrux", style = MaterialTheme.typography.headlineMedium)
+                    Text(Dates.longDay(System.currentTimeMillis()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { nav.push(Screen.Search) }) { Icon(Icons.Rounded.Search, "Search") }
+                val spin = rememberInfiniteTransition(label = "spin")
+                val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "a")
+                FilledTonalIconButton(onClick = { if (channels?.isEmpty() == true) askChannel = true else g.sync.syncNow() }, enabled = !sync.running) {
+                    Icon(Icons.Rounded.Refresh, "Refresh now", Modifier.rotate(if (sync.running) angle else 0f))
+                }
+            }
+        }
+
+        item("status") {
+            Column(Modifier.animateContentSize()) {
+                if (sync.running) {
+                    LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(6.dp))
+                    Text(sync.message, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Sync, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Synced ${Dates.ago(settings.lastSync)} · " + if (settings.dailySync) "daily auto-sync on" else "auto-sync off",
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    sync.error?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                    }
+                    shareMessage?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+
+        item("spark") { DailySpark() }
+
+        val list = channels
+        when {
+            list == null -> {}
+            list.isEmpty() -> item("empty") {
+                EmptyState("Set a channel to get your crux", "DCrux builds your daily crux from the YouTube channels you follow. Add one to begin.") {
+                    Button(onClick = { askChannel = true }) { Text("Sync now") }
+                }
+            }
+            else -> {
+                item("head") { Text("Your channels", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp)) }
+                items(list, key = { it.id }) { ch -> ChannelCard(ch, settings, startExpanded = ch.id == list.first().id) }
+            }
+        }
+    }
+}
+
+/** What to look for on Wikimedia Commons for each kind of picture. */
+private val SceneQueries = listOf(
+    "sunrise mountain landscape", "ocean sunset horizon", "starry night sky milky way",
+    "misty forest morning", "sand dunes desert sunset", "aurora borealis night",
+)
+
+/** Five lines of motivation a day, each on its own picture; both change every day. */
+@Composable
+private fun DailySpark() {
+    val g = LocalContext.current.graph
+    val day = remember(Dates.dayKey()) { Dates.dayOfEpoch().toInt() }
+    val quotes = remember(day) { Quotes.today() }
+    val pager = rememberPagerState { quotes.size }
+    LaunchedEffect(pager) {
+        while (true) {
+            delay(6500)
+            if (!pager.isScrollInProgress) pager.animateScrollToPage((pager.currentPage + 1) % quotes.size, animationSpec = tween(700))
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(232.dp).clip(RoundedCornerShape(32.dp))) {
+        HorizontalPager(pager, Modifier.fillMaxSize()) { i ->
+            Box(Modifier.fillMaxSize()) {
+                val scene = Quotes.all.indexOf(quotes[i]).coerceAtLeast(0)
+                // Painted picture first (works offline); a real open-licence photo replaces it once loaded.
+                QuoteArt(scene = scene, seed = day * 31 + i, modifier = Modifier.fillMaxSize())
+                val photo by produceState<OpenImage?>(null, day, i) {
+                    value = runCatching { g.commons.find(SceneQueries[scene.mod(SceneQueries.size)], pick = day + i) }.getOrNull()
+                }
+                photo?.let { ph ->
+                    AsyncImage(ph.url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.25f), Color.Black.copy(alpha = 0.72f)))))
+                    Text(
+                        "Photo: ${ph.credit} · ${ph.license}", color = Color.White.copy(alpha = 0.8f),
+                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 18.dp, end = 16.dp).width(170.dp),
+                    )
+                }
+                Column(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 20.dp, bottom = 34.dp)) {
+                    Text(
+                        "“${quotes[i].text}”", color = Color.White, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleLarge.copy(fontFamily = Heros, fontWeight = FontWeight.Bold),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(quotes[i].source, color = Color.White.copy(alpha = 0.88f), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Row(Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Bolt, null, tint = Color(0xFFFFE27A), modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Daily spark", color = Color.White, style = MaterialTheme.typography.labelLarge)
+        }
+        Row(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(quotes.size) { i ->
+                val w by animateFloatAsState(if (i == pager.currentPage) 22f else 7f, spring(dampingRatio = 0.6f), label = "dot")
+                Box(Modifier.height(7.dp).width(w.dp).clip(CircleShape).background(Color.White.copy(alpha = if (i == pager.currentPage) 1f else 0.5f)))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChannelCard(channel: Channel, settings: Settings, startExpanded: Boolean) {
+    val context = LocalContext.current
+    val g = context.graph
+    val nav = LocalNav.current
+    val scope = rememberCoroutineScope()
+    var expanded by rememberSaveable(channel.id) { mutableStateOf(startExpanded) }
+    var page by rememberSaveable(channel.id) { mutableIntStateOf(0) }
+    var menu by remember { mutableStateOf(false) }
+    val shorts = if (settings.showShorts) 1 else 0
+    val size = settings.pageSize
+    val total by remember(channel.id, shorts) { g.db.videos().count(channel.id, shorts) }.collectAsState(initial = 0)
+    val pageCount = (total + size - 1) / size
+    LaunchedEffect(pageCount) { if (page >= pageCount && pageCount > 0) page = pageCount - 1 }
+    val videos by remember(channel.id, shorts, size, page) { g.db.videos().page(channel.id, shorts, size, page * size) }.collectAsState(initial = emptyList())
+    val turn by animateFloatAsState(if (expanded) 180f else 0f, spring(dampingRatio = 0.6f), label = "chev")
+
+    CruxCard {
+        Column(Modifier.animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f))) {
+            Row(Modifier.clickable { expanded = !expanded }.padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(52.dp).clip(CircleShape).background(Brush.linearGradient(BrandColors)), contentAlignment = Alignment.Center) {
+                    Text(channel.title.take(1).uppercase(), color = Color.White, style = MaterialTheme.typography.titleLarge)
+                    if (channel.avatarUrl.isNotBlank()) {
+                        AsyncImage(channel.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(channel.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        if (channel.isDefault) {
+                            Spacer(Modifier.width(8.dp))
+                            Tag("Default", bg = MaterialTheme.colorScheme.tertiaryContainer, fg = MaterialTheme.colorScheme.onTertiaryContainer)
+                        }
+                    }
+                    Text(
+                        "$total videos · synced ${Dates.ago(channel.lastSyncAt)}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "Channel options") }
+                    DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Open on YouTube") }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
+                            onClick = {
+                                menu = false
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/channel/${channel.id}"))) }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Remove channel") }, leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null) },
+                            onClick = { menu = false; scope.launch { g.sync.removeChannel(channel.id) } },
+                        )
+                    }
+                }
+                Icon(Icons.Rounded.ExpandMore, if (expanded) "Collapse" else "Expand", Modifier.padding(end = 10.dp).rotate(turn))
+            }
+            AnimatedVisibility(expanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp)) {
+                    if (videos.isEmpty()) {
+                        Text(
+                            "No videos synced yet. Tap refresh.", Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    var lastDay = ""
+                    videos.forEach { v ->
+                        val day = Dates.dayKey(v.publishedAt)
+                        if (day != lastDay) {
+                            lastDay = day
+                            Text(
+                                Dates.prettyDay(day), Modifier.padding(start = 6.dp, top = 10.dp, bottom = 6.dp),
+                                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        VideoRow(v) { nav.push(Screen.VideoDetail(v.id)) }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    PaginationBar(page, pageCount, onPage = { page = it.coerceIn(0, (pageCount - 1).coerceAtLeast(0)) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoRow(v: Video, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onClick).padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            v.thumbUrl, null, contentScale = ContentScale.Crop,
+            modifier = Modifier.width(116.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(v.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(Dates.time(v.publishedAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                RelevancePill(v.relevance)
+                if (v.summary != null || v.detailed != null) Tag("Crux ready", bg = MaterialTheme.colorScheme.primaryContainer, fg = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+    }
+}
