@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import app.dcrux.ui.components.TabTitle
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Newspaper
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Psychology
@@ -529,6 +530,13 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
                         ) { Text("Reset app") }
                     }
+                }
+            }
+
+            item("update") {
+                Section("App update", Icons.Rounded.SystemUpdate) {
+                    UpdatePanel(Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+                    SwitchRow("Check for updates automatically", "Once a day, from GitHub", settings.autoUpdate) { scope.launch { g.prefs.setAutoUpdate(it) } }
                 }
             }
 

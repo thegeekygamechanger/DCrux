@@ -1,5 +1,7 @@
 package app.dcrux.ui.news
 
+import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -36,11 +38,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.TextDecrease
 import androidx.compose.material.icons.rounded.TextIncrease
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +54,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
@@ -68,6 +76,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import app.dcrux.data.Settings
 import app.dcrux.graph
 import app.dcrux.ui.LocalNav
@@ -129,10 +140,27 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
     val topics = remember(parts) { parts.filter { it.title.isNotBlank() } }
     val book = topics.size >= 2
 
+    // Full screen: the system bars, the title bar and the page numbers step aside and the page takes the whole display.
+    var full by rememberSaveable { mutableStateOf(false) }
+    val activity = LocalContext.current as? Activity
+    DisposableEffect(full) {
+        val window = activity?.window
+        if (window != null) {
+            val bars = WindowCompat.getInsetsController(window, window.decorView)
+            if (full) {
+                bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                bars.hide(WindowInsetsCompat.Type.systemBars())
+            } else bars.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { activity?.window?.let { WindowCompat.getInsetsController(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) } }
+    }
+    BackHandler(enabled = full) { full = false }
+
     CompositionLocalProvider(LocalContentColor provides ink) {
         Box(Modifier.fillMaxSize().background(desk)) {
-            Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                ScreenBar("Read mode", onBack = { nav.pop() }) {
+            Column(if (full) Modifier.fillMaxSize().padding(vertical = 8.dp) else Modifier.fillMaxSize().statusBarsPadding()) {
+                if (!full) ScreenBar("Read mode", onBack = { nav.pop() }) {
+                    IconButton(onClick = { full = true }) { Icon(Icons.Rounded.Fullscreen, "Full screen") }
                     IconButton(onClick = { scope.launch { g.prefs.setReaderScale((scale - 0.1f).coerceAtLeast(0.8f)) } }) { Icon(Icons.Rounded.TextDecrease, "Smaller text") }
                     IconButton(onClick = { scope.launch { g.prefs.setReaderScale((scale + 0.1f).coerceAtMost(1.6f)) } }) { Icon(Icons.Rounded.TextIncrease, "Larger text") }
                 }
@@ -140,7 +168,7 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
                 if (!book) {
                     // A single reading page.
                     Column(
-                        Modifier.weight(1f).padding(horizontal = 12.dp).padding(bottom = 12.dp).navigationBarsPadding()
+                        (if (full) Modifier.weight(1f).padding(horizontal = 8.dp) else Modifier.weight(1f).padding(horizontal = 12.dp).padding(bottom = 12.dp).navigationBarsPadding())
                             .clip(RoundedCornerShape(28.dp)).background(paper).verticalScroll(rememberScrollState()).padding(22.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -192,12 +220,18 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
                             TurnHint(onSkip = { hint = false })
                         }
                     }
-                    PaginationBar(
+                    if (!full) PaginationBar(
                         pager.currentPage, pageCount,
                         onPage = { p -> scope.launch { pager.animateScrollToPage(p.coerceIn(0, pageCount - 1)) } },
                         modifier = Modifier.padding(vertical = 8.dp).navigationBarsPadding(),
                     )
                 }
+            }
+            if (full) {
+                FilledTonalIconButton(
+                    onClick = { full = false },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 18.dp).size(40.dp).alpha(0.85f),
+                ) { Icon(Icons.Rounded.FullscreenExit, "Leave full screen") }
             }
         }
     }

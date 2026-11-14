@@ -98,8 +98,9 @@ import app.dcrux.graph
 import app.dcrux.net.OpenImage
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
-import app.dcrux.ui.components.AnimatedLogo
 import app.dcrux.ui.components.CruxCard
+import app.dcrux.ui.settings.UpdatePanel
+import app.dcrux.update.UpdateState
 import app.dcrux.ui.components.EmptyState
 import app.dcrux.ui.components.PaginationBar
 import app.dcrux.ui.components.PhotoCarousel
@@ -154,8 +155,6 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
     ) {
         item("bar") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedLogo(46.dp)
-                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     TabTitle("DCrux")
                     Text(Dates.longDay(System.currentTimeMillis()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -194,6 +193,14 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
                     }
                 }
             }
+        }
+
+        item("update") {
+            val update by g.updates.state.collectAsState()
+            val pending = update is UpdateState.Available || update is UpdateState.Downloading || update is UpdateState.Confirming ||
+                update is UpdateState.NeedsPermission ||
+                (update as? UpdateState.Failed)?.info != null
+            if (pending) CruxCard(color = MaterialTheme.colorScheme.primaryContainer) { UpdatePanel(Modifier.padding(16.dp), banner = true) }
         }
 
         item("spark") { DailySpark() }

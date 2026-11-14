@@ -53,8 +53,9 @@ android {
         applicationId = "app.dcrux"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        // -PtestVersionCode / -PtestVersionName build an older-looking APK for testing in-app updates.
+        versionCode = (project.findProperty("testVersionCode") as String?)?.toInt() ?: 3
+        versionName = (project.findProperty("testVersionName") as String?) ?: "1.2.0"
         vectorDrawables { useSupportLibrary = true }
         buildConfigField("String", "KA", "\"${masked.first}\"")
         buildConfigField("String", "KB", "\"${masked.second}\"")

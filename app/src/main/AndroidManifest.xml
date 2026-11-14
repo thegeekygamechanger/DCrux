@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- In-app updates: lets DCrux hand a new build to Android's installer (the user still confirms). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".DCruxApp"
@@ -52,6 +54,10 @@
             android:name=".ai.AiWorkService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".update.UpdateReceiver"
+            android:exported="false" />
 
         <!-- Streams freshly generated PDFs to other apps; nothing is ever written to disk. -->
         <provider

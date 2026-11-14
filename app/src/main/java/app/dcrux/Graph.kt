@@ -13,6 +13,7 @@ import app.dcrux.net.CommonsRepo
 import app.dcrux.net.NewsRepo
 import app.dcrux.net.YouTubeRepo
 import app.dcrux.sync.SyncManager
+import app.dcrux.update.UpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +30,7 @@ class Graph(val app: Application) {
     val claude = ClaudeClient()
     val ai: AiRepo by lazy { AiRepo(this) }
     val sync: SyncManager by lazy { SyncManager(this) }
+    val updates: UpdateManager by lazy { UpdateManager(this) }
 
     /** True when this build is set up to use the DCrux service instead of a key on the phone. */
     val usesService: Boolean get() = BuildConfig.KA.isEmpty() && BuildConfig.PX.isNotEmpty() && BuildConfig.SA.isNotEmpty()

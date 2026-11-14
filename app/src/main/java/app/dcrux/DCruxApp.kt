@@ -20,6 +20,9 @@ class DCruxApp : Application(), SingletonImageLoader.Factory {
             val s = graph.prefs.get()
             SyncManager.schedule(this@DCruxApp, s.dailySync, s.wifiOnly)
             // Catch up when the daily job was delayed (battery saver, phone off).
+            graph.updates.cleanUp()
+            // A quiet look at GitHub for a newer build, at most once a day.
+            launch { graph.updates.check() }
             if (s.dailySync && System.currentTimeMillis() - s.lastSync > 12 * 3_600_000L) graph.sync.run()
         }
     }

@@ -42,6 +42,8 @@ data class Settings(
     val seeded: Boolean = false,
     val readerScale: Float = 1f,
     val blockAds: Boolean = true,
+    val autoUpdate: Boolean = true,
+    val lastUpdateCheck: Long = 0,
 )
 
 class Prefs(private val context: Context) {
@@ -69,6 +71,8 @@ class Prefs(private val context: Context) {
         val seeded = booleanPreferencesKey("seeded")
         val readerScale = intPreferencesKey("reader_scale")
         val blockAds = booleanPreferencesKey("block_ads")
+        val autoUpdate = booleanPreferencesKey("auto_update")
+        val lastUpdateCheck = longPreferencesKey("last_update_check")
     }
 
     val flow: Flow<Settings> = context.store.data.map { p ->
@@ -97,6 +101,8 @@ class Prefs(private val context: Context) {
             seeded = p[K.seeded] ?: d.seeded,
             readerScale = (p[K.readerScale] ?: 100) / 100f,
             blockAds = p[K.blockAds] ?: d.blockAds,
+            autoUpdate = p[K.autoUpdate] ?: d.autoUpdate,
+            lastUpdateCheck = p[K.lastUpdateCheck] ?: d.lastUpdateCheck,
         )
     }
 
@@ -128,6 +134,8 @@ class Prefs(private val context: Context) {
     suspend fun setLastSync(v: Long) = edit { it[K.lastSync] = v }
     suspend fun setSeeded(v: Boolean) = edit { it[K.seeded] = v }
     suspend fun setBlockAds(v: Boolean) = edit { it[K.blockAds] = v }
+    suspend fun setAutoUpdate(v: Boolean) = edit { it[K.autoUpdate] = v }
+    suspend fun setLastUpdateCheck(v: Long) = edit { it[K.lastUpdateCheck] = v }
     suspend fun setReaderScale(v: Float) = edit { it[K.readerScale] = (v * 100).toInt() }
 
     suspend fun wipe() {

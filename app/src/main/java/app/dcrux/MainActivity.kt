@@ -52,6 +52,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        graph.updates.onAppForeground()
         // Re-lock after the app has been in the background for a short while.
         if (stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 20_000) {
             lifecycleScope.launch {

@@ -18,7 +18,7 @@ Developed by **Harsh Kumar** · [theharshkumar.in](https://theharshkumar.in)
 | **Tests** | Multiple-choice tests generated from the day's headlines for the exam and difficulty you choose. Results earn stars, are stored encrypted, and can be viewed or shared as a PDF that is generated in memory and never saved. |
 | **Mind Flow** | Fifteen soothing sounds (rain, ocean, fire, binaural tones and more), all synthesised on the phone in real time. Mix them, set a sleep timer, and control playback from the notification. |
 | **Search** | Search everything synced, with an optional AI overview written only from the matching results. |
-| **Settings** | Add channels by pasting YouTube links, pick your exams and sources, theme, model choice, app lock. |
+| **Settings** | Add channels by pasting YouTube links, pick your exams and sources, theme, model choice, app lock, in-app updates. |
 | **Privacy** | App lock with biometrics and a PIN. The AI key is encrypted with the Android Keystore. Backups are off, so nothing leaves the phone. |
 
 Android 7.0 (API 24) and newer. Kotlin, Jetpack Compose, Material 3 Expressive.
@@ -60,6 +60,23 @@ DCRUX_APP_SECRET=...
 A key inside an APK cannot be protected: anyone with the file can recover it. Never publish or
 share a personal build. For a public build use the service, and set its daily limits to what you
 are prepared to pay for.
+
+### Publishing an update
+
+The app updates itself from this repository's GitHub releases: once a day (or on request in
+**Settings → App update**) it looks at the latest release, and if that is newer it downloads
+the APK straight into Android's installer. No APK file is kept on the phone, and no server of
+ours ever holds one.
+
+So releasing is all it takes to update every phone:
+
+1. Raise `versionCode` and `versionName` in `app/build.gradle.kts`, commit and push.
+2. Write `release-notes/<version>.md`.
+3. Run `GITHUB_PAT=... scripts/release.sh`.
+
+The script builds the public APK (no key inside), refuses to go on if a key is found in it,
+then creates the release and uploads `DCrux-<version>.apk`. Every release must be signed with
+the same keystore, or Android will refuse the update.
 
 ### Release signing
 
