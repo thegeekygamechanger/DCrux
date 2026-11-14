@@ -23,7 +23,8 @@ val secretProps = Properties().apply {
     val f = rootProject.file("secrets.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
-val bakedKey: String = (secretProps.getProperty("CLAUDE_API_KEY") ?: "").trim()
+// -PnoBakedKey=true builds the public APK: no key inside, the app asks each user for their own.
+val bakedKey: String = if (project.hasProperty("noBakedKey")) "" else (secretProps.getProperty("CLAUDE_API_KEY") ?: "").trim()
 fun maskParts(key: String): Pair<String, String> {
     val bytes = key.toByteArray()
     val pad = ByteArray(bytes.size)
@@ -37,6 +38,10 @@ fun maskParts(key: String): Pair<String, String> {
     return enc.encodeToString(mixed) to enc.encodeToString(pad)
 }
 val masked = maskParts(bakedKey)
+// The DCrux service (server/): where it lives, and the secret the app signs its requests with.
+// A build with these and no baked key talks to the service and never asks the user for a key.
+val serviceUrl: String = (secretProps.getProperty("DCRUX_PROXY_URL") ?: "").trim().trimEnd('/')
+val serviceSecret = maskParts(if (serviceUrl.isEmpty()) "" else (secretProps.getProperty("DCRUX_APP_SECRET") ?: "").trim())
 
 android {
     namespace = "app.dcrux"
@@ -48,11 +53,14 @@ android {
         applicationId = "app.dcrux"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         vectorDrawables { useSupportLibrary = true }
         buildConfigField("String", "KA", "\"${masked.first}\"")
         buildConfigField("String", "KB", "\"${masked.second}\"")
+        buildConfigField("String", "PX", "\"$serviceUrl\"")
+        buildConfigField("String", "SA", "\"${serviceSecret.first}\"")
+        buildConfigField("String", "SB", "\"${serviceSecret.second}\"")
     }
 
     signingConfigs {

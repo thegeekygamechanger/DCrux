@@ -18,6 +18,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import app.dcrux.ui.components.appBackground
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.automirrored.rounded.LibraryBooks
@@ -147,10 +153,17 @@ private val tabs = listOf(
 private fun TabsScreen(nav: Nav, settings: Settings, activity: MainActivity) {
     val holder = rememberSaveableStateHolder()
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.appBackground(),
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+            // A floating, fully rounded bar rather than a strip glued to the bottom edge.
+            NavigationBar(
+                modifier = Modifier.navigationBarsPadding().padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+                    .shadow(10.dp, RoundedCornerShape(34.dp)).clip(RoundedCornerShape(34.dp)),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                windowInsets = WindowInsets(0, 0, 0, 0),
+            ) {
                 tabs.forEachIndexed { i, t ->
                     val selected = nav.tab == i
                     val scale by animateFloatAsState(if (selected) 1.18f else 1f, spring(dampingRatio = 0.45f, stiffness = 380f), label = "tab")

@@ -102,6 +102,10 @@ import app.dcrux.ui.components.AnimatedLogo
 import app.dcrux.ui.components.CruxCard
 import app.dcrux.ui.components.EmptyState
 import app.dcrux.ui.components.PaginationBar
+import app.dcrux.ui.components.PhotoCarousel
+import app.dcrux.ui.components.Slide
+import app.dcrux.ui.components.TabTitle
+import app.dcrux.ui.components.appBackground
 import app.dcrux.ui.components.RelevancePill
 import app.dcrux.ui.components.Tag
 import app.dcrux.ui.theme.BrandColors
@@ -153,7 +157,7 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
                 AnimatedLogo(46.dp)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("DCrux", style = MaterialTheme.typography.headlineMedium)
+                    TabTitle("DCrux")
                     Text(Dates.longDay(System.currentTimeMillis()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = { nav.push(Screen.Search) }) { Icon(Icons.Rounded.Search, "Search") }
@@ -219,56 +223,14 @@ private val SceneQueries = listOf(
 /** Five lines of motivation a day, each on its own picture; both change every day. */
 @Composable
 private fun DailySpark() {
-    val g = LocalContext.current.graph
     val day = remember(Dates.dayKey()) { Dates.dayOfEpoch().toInt() }
-    val quotes = remember(day) { Quotes.today() }
-    val pager = rememberPagerState { quotes.size }
-    LaunchedEffect(pager) {
-        while (true) {
-            delay(6500)
-            if (!pager.isScrollInProgress) pager.animateScrollToPage((pager.currentPage + 1) % quotes.size, animationSpec = tween(700))
+    val slides = remember(day) {
+        Quotes.today().map { q ->
+            val scene = Quotes.all.indexOf(q).coerceAtLeast(0)
+            Slide("\u201C${q.text}\u201D", q.source, SceneQueries[scene.mod(SceneQueries.size)], scene)
         }
     }
-    Box(Modifier.fillMaxWidth().height(232.dp).clip(RoundedCornerShape(32.dp))) {
-        HorizontalPager(pager, Modifier.fillMaxSize()) { i ->
-            Box(Modifier.fillMaxSize()) {
-                val scene = Quotes.all.indexOf(quotes[i]).coerceAtLeast(0)
-                // Painted picture first (works offline); a real open-licence photo replaces it once loaded.
-                QuoteArt(scene = scene, seed = day * 31 + i, modifier = Modifier.fillMaxSize())
-                val photo by produceState<OpenImage?>(null, day, i) {
-                    value = runCatching { g.commons.find(SceneQueries[scene.mod(SceneQueries.size)], pick = day + i) }.getOrNull()
-                }
-                photo?.let { ph ->
-                    AsyncImage(ph.url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.25f), Color.Black.copy(alpha = 0.72f)))))
-                    Text(
-                        "Photo: ${ph.credit} · ${ph.license}", color = Color.White.copy(alpha = 0.8f),
-                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 18.dp, end = 16.dp).width(170.dp),
-                    )
-                }
-                Column(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 20.dp, bottom = 34.dp)) {
-                    Text(
-                        "“${quotes[i].text}”", color = Color.White, maxLines = 4, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleLarge.copy(fontFamily = Heros, fontWeight = FontWeight.Bold),
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(quotes[i].source, color = Color.White.copy(alpha = 0.88f), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-        Row(Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Bolt, null, tint = Color(0xFFFFE27A), modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Daily spark", color = Color.White, style = MaterialTheme.typography.labelLarge)
-        }
-        Row(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(quotes.size) { i ->
-                val w by animateFloatAsState(if (i == pager.currentPage) 22f else 7f, spring(dampingRatio = 0.6f), label = "dot")
-                Box(Modifier.height(7.dp).width(w.dp).clip(CircleShape).background(Color.White.copy(alpha = if (i == pager.currentPage) 1f else 0.5f)))
-            }
-        }
-    }
+    PhotoCarousel("Daily spark", Icons.Rounded.Bolt, slides, day)
 }
 
 @Composable

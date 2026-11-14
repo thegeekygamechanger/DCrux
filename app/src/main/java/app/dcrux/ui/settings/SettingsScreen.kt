@@ -13,6 +13,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import app.dcrux.ui.components.TabTitle
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Newspaper
+import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -78,6 +87,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import app.dcrux.ui.components.appBackground
 import app.dcrux.ai.ClaudeException
 import app.dcrux.audio.MindFlow
 import app.dcrux.data.CustomSource
@@ -102,9 +112,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun Section(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
     Column {
-        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 6.dp, bottom = 8.dp))
+        Row(Modifier.padding(start = 4.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(title, style = MaterialTheme.typography.titleLarge)
+        }
         CruxCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(vertical = 8.dp).animateContentSize(), content = content)
         }
@@ -224,8 +240,8 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().imePadding()) {
-        if (asTab) Text("Settings", Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp), style = MaterialTheme.typography.headlineMedium)
+    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding().imePadding()) {
+        if (asTab) TabTitle("Settings", Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp))
         else ScreenBar("Settings", onBack = { nav.pop() })
         LazyColumn(
             if (asTab) Modifier.weight(1f) else Modifier.weight(1f).navigationBarsPadding(),
@@ -233,7 +249,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item("crux") {
-                Section("Your crux") {
+                Section("Your crux", Icons.Rounded.AutoAwesome) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Add YouTube channels", style = MaterialTheme.typography.titleMedium)
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -268,7 +284,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("look") {
-                Section("Appearance") {
+                Section("Appearance", Icons.Rounded.Palette) {
                     SwitchRow("Dark theme", if (settings.themeMode == "system") "Following the system right now" else null, dark) {
                         scope.launch { g.prefs.setTheme(if (it) "dark" else "light") }
                     }
@@ -282,7 +298,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("claude") {
-                Section("AI") {
+                Section("AI", Icons.Rounded.Psychology) {
                     // A build that ships with its own key shows no key controls at all.
                     if (!g.hasBuiltInKey) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -388,7 +404,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("exams") {
-                Section("Your exams") {
+                Section("Your exams", Icons.Rounded.School) {
                     Fold(settings.exams.joinToString(", ") { shortExam(it) }, examsOpen) { examsOpen = !examsOpen }
                     AnimatedVisibility(examsOpen) {
                         Column {
@@ -414,7 +430,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("sync") {
-                Section("Sync") {
+                Section("Sync", Icons.Rounded.Sync) {
                     SwitchRow("Daily auto-sync", "Every morning, in the background", settings.dailySync) {
                         scope.launch { g.prefs.setDailySync(it); SyncManager.schedule(context, it, settings.wifiOnly) }
                     }
@@ -432,7 +448,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("papers") {
-                Section("Papers") {
+                Section("Papers", Icons.Rounded.Newspaper) {
                     SwitchRow("Page-turn animation", null, settings.pageFlip) { scope.launch { g.prefs.setPageFlip(it) } }
                     SwitchRow("Block ads and trackers", "In the in-app browser", settings.blockAds) { scope.launch { g.prefs.setBlockAds(it) } }
                     Label("Crux sources")
@@ -481,7 +497,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("lock") {
-                Section("Security") {
+                Section("Security", Icons.Rounded.Lock) {
                     SwitchRow("App lock", "Biometrics first, then your PIN. Covers the whole app, including test results", settings.lockEnabled) { on ->
                         if (on) pinSetup = true else pinConfirmFor = "off"
                     }
@@ -502,7 +518,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("data") {
-                Section("Data") {
+                Section("Data", Icons.Rounded.Storage) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
                             "Everything stays on this phone and is kept until you reset: channels, history, summaries, headlines and encrypted test results. Nothing is backed up to the cloud.",

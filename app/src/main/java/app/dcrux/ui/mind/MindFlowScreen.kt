@@ -87,6 +87,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import app.dcrux.audio.MindFlow
 import app.dcrux.audio.SoundId
+import app.dcrux.data.Dates
+import app.dcrux.ui.components.PhotoCarousel
+import app.dcrux.ui.components.Slide
+import app.dcrux.ui.components.TabTitle
 import app.dcrux.ui.theme.BrandColors
 import kotlinx.coroutines.delay
 
@@ -107,6 +111,27 @@ private fun iconOf(id: SoundId): ImageVector = when (id) {
     SoundId.THETA -> Icons.Rounded.Psychology
     SoundId.ALPHA -> Icons.Rounded.Headphones
 }
+
+/** Short, original lines for winding down. Five are shown each day. */
+private val calmLines = listOf(
+    "Breathe in for four, out for six." to "A slower out-breath settles the body",
+    "Let your shoulders drop." to "Unclench the jaw, soften the hands",
+    "Nothing needs solving in this minute." to "Let the thought pass like weather",
+    "Listen for the farthest sound you can hear." to "Then the nearest one",
+    "Rest is part of the work." to "Tomorrow's focus starts tonight",
+    "Feel your feet on the floor." to "You are here, and that is enough",
+    "One page, one breath, one step." to "Small is still forward",
+    "Put the day down. It will keep." to "Pick it up again in the morning",
+    "Unhurried is a pace too." to "No rush in the next ten minutes",
+    "Notice five things you can see." to "A quick way back to the present",
+    "Loosen your grip on the hour." to "Let it be as long as it is",
+    "Quiet is not empty." to "Stay with it a little longer",
+)
+
+private val calmQueries = listOf(
+    "calm lake reflection mountains", "zen garden stones", "lotus flower pond", "bamboo forest path",
+    "moonlit sea night", "mountain lake dawn mist", "forest waterfall", "meadow sunrise fog",
+)
 
 private val presets = listOf(
     "Deep sleep" to mapOf(SoundId.RAIN to 0.55f, SoundId.BROWN to 0.4f, SoundId.DELTA to 0.3f),
@@ -140,10 +165,19 @@ fun MindFlowTab() {
     ) {
         item(span = { GridItemSpan(2) }) {
             Column {
-                Text("Mind Flow", style = MaterialTheme.typography.headlineMedium)
+                TabTitle("Mind Flow")
             }
         }
-        item(span = { GridItemSpan(2) }) { BreathCard(playing = levels.isNotEmpty() && !paused) }
+        item(span = { GridItemSpan(2) }) {
+            val day = remember(Dates.dayKey()) { Dates.dayOfEpoch().toInt() }
+            val slides = remember(day) {
+                List(5) { i ->
+                    val (line, caption) = calmLines[(day * 5 + i).mod(calmLines.size)]
+                    Slide(line, caption, calmQueries[(day + i).mod(calmQueries.size)], scene = i + 2)
+                }
+            }
+            PhotoCarousel("Daily calm", Icons.Rounded.Spa, slides, day)
+        }
         item(span = { GridItemSpan(2) }) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 presets.forEach { (name, mix) ->
@@ -187,43 +221,6 @@ fun MindFlowTab() {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-    }
-}
-
-/** A slow breathing guide: in for 4, hold for 4, out for 6. */
-@Composable
-private fun BreathCard(playing: Boolean) {
-    val t = rememberInfiniteTransition(label = "breath")
-    val phase by t.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(keyframes {
-            durationMillis = 14_000
-            0f at 0 using FastOutSlowInEasing
-            1f at 4_000
-            1f at 8_000 using FastOutSlowInEasing
-            0f at 14_000
-        }),
-        label = "phase",
-    )
-    val clock by t.animateFloat(0f, 14f, infiniteRepeatable(keyframes { durationMillis = 14_000; 0f at 0; 14f at 14_000 }), label = "clock")
-    val word = when {
-        clock < 4f -> "Breathe in"
-        clock < 8f -> "Hold"
-        else -> "Breathe out"
-    }
-    Box(
-        Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(32.dp)).background(Brush.linearGradient(listOf(Color(0xFF1B1245), Color(0xFF3A1C71), Color(0xFF6A2C8F)))),
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.size(150.dp)) {
-            val r = size.minDimension / 2
-            drawCircle(Brush.radialGradient(listOf(BrandColors[2].copy(alpha = 0.35f), Color.Transparent)), radius = r * (0.7f + 0.3f * phase))
-            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFE27A), BrandColors[2], BrandColors[0])), radius = r * (0.32f + 0.36f * phase))
-        }
-        Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(word, color = Color.White, style = MaterialTheme.typography.titleMedium)
-            Text(if (playing) "Sounds are playing" else "Pick a sound or a mix below", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall)
         }
     }
 }

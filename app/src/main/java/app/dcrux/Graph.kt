@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Base64
 import app.dcrux.ai.AiRepo
 import app.dcrux.ai.ClaudeClient
+import app.dcrux.ai.ServiceAuth
 import app.dcrux.data.AppDb
 import app.dcrux.data.Prefs
 import app.dcrux.data.SecureStore
@@ -29,22 +30,34 @@ class Graph(val app: Application) {
     val ai: AiRepo by lazy { AiRepo(this) }
     val sync: SyncManager by lazy { SyncManager(this) }
 
-    /** True when this build ships with its own key, in which case the app never asks for one. */
-    val hasBuiltInKey: Boolean get() = BuildConfig.KA.isNotEmpty()
+    /** True when this build is set up to use the DCrux service instead of a key on the phone. */
+    val usesService: Boolean get() = BuildConfig.KA.isEmpty() && BuildConfig.PX.isNotEmpty() && BuildConfig.SA.isNotEmpty()
 
-    private fun builtInKey(): String? {
-        if (!hasBuiltInKey) return null
-        return runCatching {
-            val a = Base64.decode(BuildConfig.KA, Base64.DEFAULT)
-            val b = Base64.decode(BuildConfig.KB, Base64.DEFAULT)
-            String(ByteArray(a.size) { (a[it].toInt() xor b[it].toInt()).toByte() })
-        }.getOrNull()?.takeIf { it.isNotBlank() }
+    /** True when the AI works out of the box (a built-in key or the service), so the app never asks for a key. */
+    val hasBuiltInKey: Boolean get() = BuildConfig.KA.isNotEmpty() || usesService
+
+    private fun unmask(a64: String, b64: String): String? = runCatching {
+        val a = Base64.decode(a64, Base64.DEFAULT)
+        val b = Base64.decode(b64, Base64.DEFAULT)
+        String(ByteArray(a.size) { (a[it].toInt() xor b[it].toInt()).toByte() })
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    init {
+        if (usesService) {
+            unmask(BuildConfig.SA, BuildConfig.SB)?.let { secret ->
+                claude.service = ServiceAuth(BuildConfig.PX, secure.deviceId(), secret.toByteArray())
+            }
+        }
     }
 
-    /** The key in the encrypted store; on first run a built-in key is moved there. */
+    /**
+     * What to call the AI with: a key the user saved, else the built-in key (moved into the
+     * encrypted store on first use), else the marker that sends requests through the service.
+     */
     fun apiKey(): String? {
         secure.apiKey()?.let { return it }
-        return builtInKey()?.also { secure.saveApiKey(it) }
+        if (BuildConfig.KA.isNotEmpty()) return unmask(BuildConfig.KA, BuildConfig.KB)?.also { secure.saveApiKey(it) }
+        return if (usesService) ClaudeClient.VIA_SERVICE else null
     }
 }
 

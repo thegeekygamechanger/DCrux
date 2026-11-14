@@ -13,7 +13,7 @@ Developed by **Harsh Kumar** · [theharshkumar.in](https://theharshkumar.in)
 | Area | What you get |
 | --- | --- |
 | **Crux** | Each YouTube channel you add becomes a card with its history by date, paginated. A daily "spark" carousel pairs public-domain quotations with artwork painted in code; both change every day. |
-| **Video** | The official YouTube player with all its controls, plus a Summary / Detailed toggle written by AI from what is said in the video (its captions), and a per-exam relevance score. |
+| **Video** | The official YouTube player with all its controls, plus a Summary / Detailed toggle written by AI from what is said in the video (its captions), and a per-exam relevance score. Read mode opens the notes as a book: a cover with the contents, then one page per topic, turned like paper. |
 | **Papers** | Headlines live from The Hindu, The Indian Express, PIB and more, laid out as newspaper pages with a page-turn animation. Each headline is scored for your exams. Articles and e-papers open on the publisher's own site in a no-cache in-app browser with an ad blocker and a read-mode button. |
 | **Tests** | Multiple-choice tests generated from the day's headlines for the exam and difficulty you choose. Results earn stars, are stored encrypted, and can be viewed or shared as a PDF that is generated in memory and never saved. |
 | **Mind Flow** | Fifteen soothing sounds (rain, ocean, fire, binaural tones and more), all synthesised on the phone in real time. Mix them, set a sleep timer, and control playback from the notification. |
@@ -39,19 +39,27 @@ Requirements: JDK 17+, Android SDK with platform 37 and build-tools 36.
 ./gradlew :app:assembleRelease      # release APK (signed with keystore.properties if present)
 ```
 
-### Claude API key
+### Where the AI key lives
 
-The AI features use the Claude API. By default the app asks for a key in **Settings → AI** (Test API, then Save API key).
+The AI features use the Claude API. There are three ways to build the app:
 
-For a personal build you can bake a key in so the app never asks and shows no key controls. Create `secrets.properties`
-in the project root (it is git-ignored):
+| Build | Key | For |
+| --- | --- | --- |
+| Plain (`./gradlew :app:assembleRelease` with no `secrets.properties`) | Each user pastes their own in **Settings → AI** (Test API, then Save API key); it is stored encrypted with the Android Keystore | Anyone building from source |
+| Service (`-PnoBakedKey=true` with `DCRUX_PROXY_URL` and `DCRUX_APP_SECRET` set) | None in the app; requests go through the relay in [`server/`](server/README.md), which holds the key and applies daily limits | A public release that works out of the box |
+| Personal (`CLAUDE_API_KEY` in `secrets.properties`) | Baked into the APK, only lightly masked | Your own phone only |
+
+`secrets.properties` lives in the project root and is git-ignored:
 
 ```properties
 CLAUDE_API_KEY=sk-ant-...
+DCRUX_PROXY_URL=https://your.host
+DCRUX_APP_SECRET=...
 ```
 
-A baked-in key is only lightly masked inside the APK. Anyone who gets that APK file can
-recover it, so never publish or share an APK built this way, and set a spend limit on the key.
+A key inside an APK cannot be protected: anyone with the file can recover it. Never publish or
+share a personal build. For a public build use the service, and set its daily limits to what you
+are prepared to pay for.
 
 ### Release signing
 
@@ -76,6 +84,7 @@ app/src/main/java/app/dcrux/
   pdf/       In-memory PDF layout and streaming share provider
   lock/      Biometric and PIN app lock
   ui/        Compose screens and theme
+server/      The optional relay that holds the API key for public builds
 ```
 
 ## Licence

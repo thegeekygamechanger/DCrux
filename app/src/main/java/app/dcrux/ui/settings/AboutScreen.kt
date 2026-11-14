@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.dcrux.ui.components.appBackground
 import app.dcrux.BuildConfig
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.ScreenBar
@@ -76,7 +77,7 @@ fun AboutScreen() {
     val nav = LocalNav.current
     fun open(url: String) = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding()) {
         ScreenBar("About", onBack = { nav.pop() })
         LazyColumn(
             Modifier.weight(1f).navigationBarsPadding(),

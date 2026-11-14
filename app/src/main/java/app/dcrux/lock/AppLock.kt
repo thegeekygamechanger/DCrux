@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import app.dcrux.ui.components.appBackground
 import app.dcrux.graph
 import app.dcrux.ui.components.AnimatedLogo
 import kotlinx.coroutines.Dispatchers
@@ -143,7 +144,7 @@ fun LockScreen(biometric: Boolean, onUnlocked: () -> Unit) {
 
     val blocked = now < blockedUntil
     Column(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).systemBarsPadding().padding(24.dp),
+        Modifier.fillMaxSize().appBackground().systemBarsPadding().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         AnimatedLogo(84.dp)

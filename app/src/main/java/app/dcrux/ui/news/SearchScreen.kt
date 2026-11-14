@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.dcrux.ui.components.appBackground
 import app.dcrux.ai.ClaudeException
 import app.dcrux.data.Dates
 import app.dcrux.data.NewsItem
@@ -137,7 +138,7 @@ fun SearchScreen(settings: Settings) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().imePadding()) {
+    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding().imePadding()) {
         ScreenBar("Search", onBack = { nav.pop() })
         OutlinedTextField(
             value = query, onValueChange = { query = it; page = 0 },

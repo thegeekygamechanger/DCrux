@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.dcrux.ui.components.appBackground
 import app.dcrux.data.Settings
 import app.dcrux.net.AdBlock
 import app.dcrux.ui.LocalNav
@@ -126,7 +127,7 @@ fun BrowserScreen(url: String, title: String, settings: Settings) {
 
     BackHandler { if (web.canGoBack()) web.goBack() else nav.pop() }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding().navigationBarsPadding()) {
         ScreenBar(pageTitle, onBack = { nav.pop() }) {
             ReadModeButton(onClick = {
                 // Read mode reformats the page that is already open, on the phone; nothing is stored.

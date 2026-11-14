@@ -92,6 +92,10 @@ import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import app.dcrux.ui.components.EmptyState
 import app.dcrux.ui.components.PaginationBar
+import app.dcrux.ui.components.TabTitle
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
+import app.dcrux.ui.components.paperTurn
 import app.dcrux.ui.components.ReadModeButton
 import app.dcrux.ui.components.RelevancePill
 import app.dcrux.ui.components.Tag
@@ -99,46 +103,6 @@ import app.dcrux.ui.theme.Heros
 import app.dcrux.ui.theme.LocalExtra
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
-
-/**
- * Turns the outgoing page like a sheet of newsprint: it stays pinned at the spine and
- * swings over on its left edge while the next page waits underneath.
- */
-private fun Modifier.paperTurn(pager: PagerState, page: Int, enabled: Boolean): Modifier {
-    if (!enabled) return this
-    return this
-        .zIndex(-page.toFloat())
-        .graphicsLayer {
-            val offset = (page - pager.currentPage) - pager.currentPageOffsetFraction
-            when {
-                offset <= -1f || offset >= 1f -> alpha = 0f
-                offset < 0f -> {
-                    // leaving: pinned in place, rotating around the left edge towards the reader
-                    translationX = -offset * size.width
-                    transformOrigin = TransformOrigin(0f, 0.5f)
-                    cameraDistance = 34f * density
-                    rotationY = offset * 92f
-                    alpha = if (offset < -0.96f) 0f else 1f
-                }
-                else -> {
-                    // arriving: lies flat underneath, uncovered as the sheet above turns
-                    translationX = -offset * size.width
-                    alpha = 1f
-                }
-            }
-        }
-        .drawWithContent {
-            drawContent()
-            val offset = (page - pager.currentPage) - pager.currentPageOffsetFraction
-            if (offset < 0f && offset > -1f) {
-                // the turning sheet darkens towards its far edge as it lifts
-                drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.28f * offset.absoluteValue))))
-            } else if (offset > 0f && offset < 1f) {
-                // shadow cast on the page below
-                drawRect(Color.Black.copy(alpha = 0.22f * (1f - offset)))
-            }
-        }
-}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -155,7 +119,7 @@ fun NewsTab(settings: Settings) {
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Papers", style = MaterialTheme.typography.headlineMedium)
+                TabTitle("Papers")
             }
             IconButton(onClick = { nav.push(Screen.Search) }) { Icon(Icons.Rounded.Search, "Search") }
             IconButton(onClick = { showEpapers = true }) { Icon(Icons.AutoMirrored.Rounded.MenuBook, "E-papers") }
@@ -303,14 +267,13 @@ private fun ColumnScope.PaperView(sources: List<NewsSource>, source: NewsSource,
             g.db.news().page(source.id, day, minScore, if (picks) 1 else 0, size, page * size)
         }.collectAsState(initial = emptyList())
         Box(Modifier.fillMaxSize().paperTurn(pager, page, settings.pageFlip).padding(horizontal = 12.dp, vertical = 4.dp)) {
-            PaperSheet(source, day, page, pageCount, items)
+            PaperSheet(source, day, page, pageCount, items) { p -> scope.launch { pager.animateScrollToPage(p.coerceIn(0, pageCount - 1)) } }
         }
     }
-    PaginationBar(pager.currentPage, pageCount, onPage = { p -> scope.launch { pager.animateScrollToPage(p.coerceIn(0, pageCount - 1)) } }, modifier = Modifier.padding(vertical = 8.dp))
 }
 
 @Composable
-private fun PaperSheet(source: NewsSource, day: String, page: Int, pageCount: Int, items: List<NewsItem>) {
+private fun PaperSheet(source: NewsSource, day: String, page: Int, pageCount: Int, items: List<NewsItem>, onPage: (Int) -> Unit) {
     val nav = LocalNav.current
     val dark = LocalExtra.current.dark
     val paper = if (dark) Color(0xFF24232A) else Color(0xFFFFFBF2)
@@ -360,6 +323,11 @@ private fun PaperSheet(source: NewsSource, day: String, page: Int, pageCount: In
                 }
             }
             if (i < items.lastIndex) HorizontalDivider(color = ink.copy(alpha = 0.18f))
+        }
+        // Page numbers sit at the foot of the sheet and scroll with it, leaving the screen to the news.
+        HorizontalDivider(color = ink.copy(alpha = 0.18f))
+        CompositionLocalProvider(LocalContentColor provides ink) {
+            PaginationBar(page, pageCount, onPage = onPage, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
         }
     }
 }

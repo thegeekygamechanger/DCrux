@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.dcrux.ui.components.appBackground
 import app.dcrux.ai.AiWork
 import app.dcrux.data.Dates
 import app.dcrux.data.Settings
@@ -145,7 +146,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding()) {
         ScreenBar("Video crux", onBack = { nav.pop() }) {
             if (text != null && v != null) {
                 ReadModeButton(onClick = {

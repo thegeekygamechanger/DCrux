@@ -160,7 +160,8 @@ class NewsRepo {
 
     private suspend fun fetchFeed(source: NewsSource, feed: Feed): List<NewsItem> {
         val url = normalise(feed.url)
-        val body = Http.getText(url)
+        // Publisher feeds hiccup now and then; one quiet second try before calling it a failure.
+        val body = try { Http.getText(url) } catch (e: java.io.IOException) { kotlinx.coroutines.delay(1500); Http.getText(url) }
         return if (url.contains("://t.me/")) parseTelegram(source, feed, body) else parseFeed(source, feed, body)
     }
 

@@ -23,6 +23,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.security.MessageDigest
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlin.coroutines.coroutineContext
 
 class ClaudeException(val kind: Kind, message: String, val status: Int = 0, val retryAfterSec: Int = 0) : Exception(message) {
@@ -39,7 +42,8 @@ class ClaudeException(val kind: Kind, message: String, val status: Int = 0, val 
             Kind.BILLING -> "The AI account has a billing problem (credits or payment)."
             Kind.PERMISSION -> "This API key is not allowed to do that."
             Kind.NOT_FOUND -> "That model is not available for this API key."
-            Kind.RATE_LIMIT -> "Rate limit reached. Try again in a little while."
+            // The service explains its own daily limits in plain words; pass those on as they are.
+            Kind.RATE_LIMIT -> message?.takeIf { it.contains("tomorrow") } ?: "Rate limit reached. Try again in a little while."
             Kind.OVERLOADED -> "The AI is busy right now. Try again shortly."
             Kind.TOO_LARGE -> "This is too long to send in one request."
             Kind.SERVER -> "The AI service had a problem. Try again."
@@ -53,6 +57,9 @@ class ClaudeException(val kind: Kind, message: String, val status: Int = 0, val 
 
 data class Completion(val text: String, val model: String)
 
+/** How to reach the DCrux service: its address, this install's id and the secret requests are signed with. */
+class ServiceAuth(val baseUrl: String, val deviceId: String, val secret: ByteArray)
+
 /**
  * Talks to the Claude Messages API directly over HTTPS from the phone.
  * (The official Java SDK depends on Jackson 2.19, which needs Android 8+; DCrux supports Android 7.)
@@ -60,10 +67,28 @@ data class Completion(val text: String, val model: String)
 class ClaudeClient {
     private val json = "application/json".toMediaType()
 
-    private fun base(url: String, apiKey: String, beta: String?) = Request.Builder().url(url)
-        .header("x-api-key", apiKey)
-        .header("anthropic-version", VERSION)
-        .apply { if (beta != null) header("anthropic-beta", beta) }
+    /** Set when this build uses the DCrux service; see [VIA_SERVICE]. */
+    @Volatile var service: ServiceAuth? = null
+
+    /**
+     * Starts a request for [path]. With a real key it goes straight to the API. With [VIA_SERVICE]
+     * it goes to the DCrux service, signed with this install's id, the time and a hash of [body],
+     * so the service can tell the app from a stranger and count fair use per install.
+     */
+    private fun base(path: String, apiKey: String, beta: String?, body: ByteArray = ByteArray(0)): Request.Builder {
+        val svc = service
+        val builder = if (apiKey == VIA_SERVICE && svc != null) {
+            val ts = System.currentTimeMillis().toString()
+            val bodyHash = MessageDigest.getInstance("SHA-256").digest(body).joinToString("") { "%02x".format(it) }
+            val mac = Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(svc.secret, "HmacSHA256")) }
+            val sig = mac.doFinal("${svc.deviceId}.$ts.$bodyHash".toByteArray()).joinToString("") { "%02x".format(it) }
+            Request.Builder().url(svc.baseUrl + path)
+                .header("x-dcrux-device", svc.deviceId).header("x-dcrux-ts", ts).header("x-dcrux-sig", sig)
+        } else {
+            Request.Builder().url(BASE + path).header("x-api-key", apiKey)
+        }
+        return builder.header("anthropic-version", VERSION).apply { if (beta != null) header("anthropic-beta", beta) }
+    }
 
     /** Lists the models this key can use, with the capabilities DCrux adapts to. Doubles as the key test. */
     suspend fun listModels(apiKey: String): List<ModelInfo> = withContext(Dispatchers.IO) {
@@ -71,8 +96,8 @@ class ClaudeClient {
         var after: String? = null
         var beta: String? = FALLBACK_BETA
         while (true) {
-            val url = "$BASE/v1/models?limit=100" + (after?.let { "&after_id=$it" } ?: "")
-            val res = execute(base(url, apiKey, beta).get().build())
+            val path = "/v1/models?limit=100" + (after?.let { "&after_id=$it" } ?: "")
+            val res = execute(base(path, apiKey, beta).get().build())
             val body = res.use { r ->
                 val text = r.body.string()
                 if (r.code == 400 && beta != null) null
@@ -144,8 +169,9 @@ class ClaudeClient {
             // If a safety classifier declines, let the API retry on its recommended model.
             if (model.fallbacks) put("fallbacks", "default")
         }
-        val req = base("$BASE/v1/messages", apiKey, if (model.fallbacks) FALLBACK_BETA else null)
-            .post(body.toString().toRequestBody(json)).build()
+        val bytes = body.toString().toByteArray(Charsets.UTF_8)
+        val req = base("/v1/messages", apiKey, if (model.fallbacks) FALLBACK_BETA else null, bytes)
+            .post(bytes.toRequestBody(json)).build()
         val call = Http.streaming.newCall(req)
         val handle = coroutineContext.job.invokeOnCompletion { if (it != null) call.cancel() }
         try {
@@ -233,6 +259,9 @@ class ClaudeClient {
 
     companion object {
         const val BASE = "https://api.anthropic.com"
+
+        /** Stands in for a key when requests go through the DCrux service. */
+        const val VIA_SERVICE = "via-dcrux-service"
         const val VERSION = "2026-10-21"
         const val FALLBACK_BETA = "server-side-fallback-2026-07-01"
         val EFFORTS = listOf("low", "medium", "high", "xhigh", "max")

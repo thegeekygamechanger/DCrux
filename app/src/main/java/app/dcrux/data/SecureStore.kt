@@ -71,6 +71,11 @@ class SecureStore(context: Context) {
         if (k.length < 12) "••••" else k.take(7) + "••••••••" + k.takeLast(4)
     }
 
+    /** A random id made once per install. It identifies nothing about the person or the phone. */
+    fun deviceId(): String = prefs.getString(K_DEVICE, null) ?: java.util.UUID.randomUUID().toString().replace("-", "").also {
+        prefs.edit().putString(K_DEVICE, it).apply()
+    }
+
     // --- App-lock PIN -----------------------------------------------------------------
 
     fun hasPin(): Boolean = prefs.contains(K_PIN)
@@ -109,5 +114,6 @@ class SecureStore(context: Context) {
         const val IV_LEN = 12
         const val K_API = "claude_api_key"
         const val K_PIN = "app_pin"
+        const val K_DEVICE = "install_id"
     }
 }

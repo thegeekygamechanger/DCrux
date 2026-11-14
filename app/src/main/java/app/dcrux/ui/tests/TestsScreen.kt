@@ -108,6 +108,8 @@ import app.dcrux.ui.components.EmptyState
 import app.dcrux.ui.components.PaginationBar
 import app.dcrux.ui.components.Stars
 import app.dcrux.ui.components.Tag
+import app.dcrux.ui.components.TabTitle
+import app.dcrux.ui.components.appBackground
 import app.dcrux.ui.components.shortExam
 import app.dcrux.ui.theme.BrandColors
 import app.dcrux.ui.theme.LocalExtra
@@ -166,7 +168,7 @@ fun TestsTab(settings: Settings) {
         item("head") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Tests", style = MaterialTheme.typography.headlineMedium)
+                    TabTitle("Tests")
                 }
                 IconButton(onClick = { nav.push(Screen.Search) }) { Icon(Icons.Rounded.Search, "Search") }
             }
@@ -326,7 +328,7 @@ fun TestRunScreen(screen: Screen.TestRun) {
     }
 
     val answered = answers.count { it >= 0 }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding().navigationBarsPadding()) {
         ScreenBar(screen.title, onBack = { confirmLeave = true }) {
             Tag("%d:%02d".format(seconds / 60, seconds % 60))
             Spacer(Modifier.width(8.dp))
@@ -405,7 +407,7 @@ fun TestReviewScreen(id: Long, fresh: Boolean) {
     }
     var page by rememberSaveable { mutableIntStateOf(0) }
     val r = result
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding()) {
         ScreenBar("Result", onBack = { nav.pop() }) {
             IconButton(onClick = { nav.push(Screen.PdfPreview(id)) }) { Icon(Icons.Rounded.PictureAsPdf, "View as PDF") }
             IconButton(onClick = { PdfShareProvider.share(context, id) }) { Icon(Icons.Rounded.IosShare, "Share PDF") }

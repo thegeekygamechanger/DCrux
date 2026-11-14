@@ -1,4 +1,4 @@
-package app.dcrux.ui.home
+package app.dcrux.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
