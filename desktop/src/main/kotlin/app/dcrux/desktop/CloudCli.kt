@@ -5,7 +5,7 @@ import java.io.File
 
 /**
  * Pairs a data folder with other devices from the command line and says what arrived: a way to
- * check sync against a phone without opening the window. Usage: CloudCli <data dir> join <code> | sync | status
+ * check sync against a phone without opening the window. Usage: CloudCli <data dir> join <code> | sync | mark <text> | erase | status
  */
 fun main(args: Array<String>) {
     val g = desktopGraph(DesktopPlatform(File(args[0]).apply { mkdirs() }))
@@ -13,6 +13,8 @@ fun main(args: Array<String>) {
         when (args.getOrNull(1)) {
             "join" -> println("joined: " + g.cloud.join(args.getOrElse(2) { "" }))
             "sync" -> g.cloud.syncNow()
+            // Ends sync for this code and erases the stored copy (after a test pairing).
+            "erase" -> g.cloud.disable(eraseCloud = true)
             // Adds a question from this side, to see it arrive on the other device.
             "mark" -> {
                 val v = g.db.videos().withNotes().firstOrNull()
