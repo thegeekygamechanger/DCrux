@@ -289,6 +289,7 @@ class MainsStore(private val g: Graph) {
          * the earlier score as text.
          */
         suspend fun save(g: Graph, result: TestResult, retakeOf: Long): Triple<Long, Boolean, String> = withContext(Dispatchers.Default) {
+            g.cloud.syncSoon()
             val old = if (retakeOf != 0L) g.db.tests().get(retakeOf)?.let { decode(g, it) } else null
             if (old == null) {
                 val id = g.db.tests().insert(TestRecord(createdAt = result.takenAt, payload = g.secure.encrypt(AppJson.encodeToString(result))))

@@ -211,6 +211,7 @@ class AiRepo(private val g: Graph) {
                 if (detailed) g.db.videos().setDetailed(video.id, result.markdown.trim(), basis, model)
                 else g.db.videos().setSummary(video.id, result.markdown.trim(), basis, model)
                 if (result.relevance.isNotEmpty()) g.db.videos().setRelevance(video.id, AppJson.encodeToString(clamp(result.relevance)))
+                g.cloud.syncSoon()
                 setJob(key, null)
             } catch (e: CancellationException) {
                 setJob(key, null)
@@ -707,6 +708,7 @@ class AiRepo(private val g: Graph) {
                 if (answer.isBlank()) throw ClaudeException(ClaudeException.Kind.PARSE, "empty")
                 val stored = answer + done.sources.joinToString("") { (title, url) -> "\n$SRC${title.replace(" | ", " - ").replace("\n", " ")} | $url" }
                 g.db.asks().insert(Ask(articleId = id, question = q, answer = stored, askedAt = System.currentTimeMillis(), followups = followupsOf(done.text).joinToString("\n"), topic = topic.title))
+                g.cloud.syncSoon()
                 asking.update { it - id }
             } catch (e: CancellationException) {
                 // Stopped by the student: keep what had been written, clearly marked as unfinished.

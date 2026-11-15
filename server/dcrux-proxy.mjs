@@ -40,6 +40,11 @@ const cfg = {
   // data.gov.in (the site's public sample key is rationed to a few dozen requests and cannot carry an app).
   // Without it the relay answers "not set up" and the app shows its own estimate instead.
   dataGovKey: env.DATAGOV_API_KEY || '',
+  // Sync across a person's devices: where their encrypted data is kept. The relay cannot read it (the key
+  // never leaves the devices); it only stores and returns it. Unset means sync is not offered.
+  syncDir: env.DCRUX_SYNC_DIR || '',
+  syncMaxTotal: Number(env.DCRUX_SYNC_MAX_TOTAL_BYTES || 2_000_000_000),
+  syncWritesDaily: Number(env.DCRUX_SYNC_WRITES_DAILY || 600),
   upstream: env.DCRUX_UPSTREAM || 'https://api.anthropic.com',
 };
 if (!cfg.apiKey || !cfg.appSecret) {
@@ -140,6 +145,13 @@ function upstreamRequest(method, path, headers, body, onResponse, onError) {
 }
 
 let modelsCache = { at: 0, body: null };
+
+// How much encrypted sync data is stored, counted once at start and kept up to date after that.
+let syncTotal = 0;
+if (cfg.syncDir) {
+  try { fs.mkdirSync(cfg.syncDir, { recursive: true, mode: 0o700 }); for (const f of fs.readdirSync(cfg.syncDir)) syncTotal += fs.statSync(`${cfg.syncDir}/${f}`).size; }
+  catch (e) { console.error('sync folder not usable:', e.message); }
+}
 
 // ---- air quality from CPCB monitors -------------------------------------------------------
 const AQI_RESOURCE = 'https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69';
@@ -271,6 +283,54 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(body);
         return log(200, `aqi ${data.stations} stations`);
       } catch (e) { send(res, 502, 'api_error', 'The air-quality data is not available right now.'); return log(502, 'aqi ' + (e?.message || '')); }
+    }
+
+    const syncMatch = /^\/v1\/sync\/([0-9a-f]{64})$/.exec(url.pathname);
+    if (syncMatch && ['GET', 'PUT', 'DELETE'].includes(req.method)) {
+      let body = Buffer.alloc(0);
+      if (req.method === 'PUT') {
+        try { body = await readBody(req, cfg.maxBody); }
+        catch (e) { send(res, e.status || 400, e.status === 413 ? 'request_too_large' : 'invalid_request_error', 'Too much data to sync in one go.'); return log(e.status || 400, 'sync'); }
+      }
+      if (!checkCaller(req, body)) { send(res, 401, 'authentication_error', 'Unrecognised client.'); return log(401); }
+      if (!cfg.syncDir) { send(res, 503, 'api_error', 'Sync is not set up on this service.'); return log(503, 'sync off'); }
+      const file = `${cfg.syncDir}/${syncMatch[1]}.json`;
+      const json = (status, obj) => { const b = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(b); };
+      const current = () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+      if (req.method === 'GET') {
+        const cur = current();
+        if (!cur) { send(res, 404, 'not_found_error', 'Nothing is stored for this code yet.'); return log(404, 'sync get'); }
+        json(200, cur); return log(200, `sync get v${cur.version}`);
+      }
+      if (req.method === 'DELETE') {
+        // The data goes; a small marker stays, so the person's other devices learn that sync was ended
+        // on purpose and stop, instead of uploading their copy again.
+        const cur = current();
+        const size = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
+        const marker = JSON.stringify({ version: (cur ? cur.version : 0) + 1, updated: Date.now(), erased: true });
+        fs.writeFileSync(file, marker, { mode: 0o600 });
+        syncTotal = Math.max(0, syncTotal - size + marker.length);
+        json(200, { ok: true }); return log(200, 'sync erase');
+      }
+      let put;
+      try { put = JSON.parse(body.toString('utf8')); } catch { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'sync'); }
+      if (typeof put.data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(put.data) || !Number.isInteger(put.base)) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'sync'); }
+      roll();
+      const wk = 's' + syncMatch[1].slice(0, 16);
+      if ((counters.devices[wk] || 0) >= cfg.syncWritesDaily) { send(res, 429, 'rate_limit_error', 'Too many sync updates today. It resets tomorrow.', { 'retry-after': '3600' }); return log(429, 'sync writes'); }
+      const cur = current();
+      const version = cur ? cur.version : 0;
+      // Two devices saving at once: the second is told to fetch, merge and try again, so neither overwrites the other.
+      if (cur && cur.erased) { send(res, 410, 'invalid_request_error', 'Sync for this code was ended and erased.'); return log(410, 'sync erased'); }
+      if (put.base !== version) { json(409, { version }); return log(409, `sync base ${put.base} != ${version}`); }
+      const oldSize = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
+      const next = JSON.stringify({ version: version + 1, updated: Date.now(), data: put.data });
+      if (syncTotal - oldSize + next.length > cfg.syncMaxTotal) { send(res, 507, 'api_error', 'Sync storage is full for now.'); return log(507, 'sync full'); }
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, next, { mode: 0o600 }); fs.renameSync(tmp, file);
+      syncTotal += next.length - oldSize;
+      counters.devices[wk] = (counters.devices[wk] || 0) + 1;
+      json(200, { version: version + 1 }); return log(200, `sync put v${version + 1} ${next.length}b`);
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/messages') {

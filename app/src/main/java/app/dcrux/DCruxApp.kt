@@ -33,6 +33,7 @@ class DCruxApp : Application(), SingletonImageLoader.Factory {
             openDb = { openAndroidDb(this) },
             makeUpdates = { UpdateManager(it, this) },
         )
+        graph.cloud.start()
         graph.scope.launch {
             val s = graph.prefs.get()
             platform.scheduleDailySync(s.dailySync, s.wifiOnly)

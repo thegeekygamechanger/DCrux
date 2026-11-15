@@ -116,3 +116,13 @@ tasks.register<JavaExec>("render") {
     args = ((project.findProperty("shots") as String?) ?: "").split(' ').filter { it.isNotBlank() }
     jvmArgs("-Djava.awt.headless=true")
 }
+
+// Two simulated devices pair and exchange data through the service this build points at (see SyncCheck.kt).
+// Point the build at a local relay first: DCRUX_PROXY_URL=http://127.0.0.1:<port> DCRUX_APP_SECRET=<its secret>.
+tasks.register<JavaExec>("syncCheck") {
+    group = "verification"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("app.dcrux.desktop.SyncCheckKt")
+    args = listOf(layout.buildDirectory.dir("sync-check").get().asFile.path)
+    jvmArgs("-Djava.awt.headless=true")
+}

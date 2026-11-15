@@ -77,6 +77,10 @@ interface VideoDao {
     @Query("UPDATE videos SET relevance = :relevance WHERE id = :id")
     suspend fun setRelevance(id: String, relevance: String)
 
+    /** Every video that has notes or a score: what is worth carrying to another device. */
+    @Query("SELECT * FROM videos WHERE summary IS NOT NULL OR detailed IS NOT NULL")
+    suspend fun withNotes(): List<Video>
+
     @Query("SELECT * FROM videos WHERE relevance IS NULL ORDER BY publishedAt DESC LIMIT :n")
     suspend fun unrated(n: Int): List<Video>
 
@@ -160,6 +164,9 @@ interface TestDao {
     @Query("SELECT * FROM tests WHERE id = :id")
     suspend fun get(id: Long): TestRecord?
 
+    @Query("SELECT * FROM tests")
+    suspend fun all(): List<TestRecord>
+
     @Query("UPDATE tests SET payload = :payload WHERE id = :id")
     suspend fun setPayload(id: Long, payload: String)
 
@@ -184,6 +191,9 @@ interface AskDao {
 
     @Query("SELECT * FROM asks ORDER BY askedAt DESC")
     fun observeAll(): Flow<List<Ask>>
+
+    @Query("SELECT * FROM asks")
+    suspend fun all(): List<Ask>
 
     @Insert
     suspend fun insert(a: Ask): Long

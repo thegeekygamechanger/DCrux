@@ -110,6 +110,19 @@ class ClaudeClient {
         }.getOrNull()
     }
 
+    /**
+     * A signed call to the DCrux service for something other than the AI (sync). Returns the status
+     * and the reply, or null when this build has no service or it could not be reached.
+     */
+    suspend fun serviceCall(method: String, path: String, body: String? = null): Pair<Int, String>? = withContext(Dispatchers.IO) {
+        if (service == null) return@withContext null
+        runCatching {
+            val bytes = body?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+            val req = base(path, VIA_SERVICE, null, bytes).method(method, if (body != null) bytes.toRequestBody(json) else null).build()
+            Http.streaming.newCall(req).execute().use { r -> r.code to r.body.string() }
+        }.getOrNull()
+    }
+
     /** Lists the models this key can use, with the capabilities DCrux adapts to. Doubles as the key test. */
     suspend fun listModels(apiKey: String): List<ModelInfo> = withContext(Dispatchers.IO) {
         val out = mutableListOf<ModelInfo>()

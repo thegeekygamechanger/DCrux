@@ -11,6 +11,7 @@ import app.dcrux.net.CommonsRepo
 import app.dcrux.net.NewsRepo
 import app.dcrux.net.WeatherRepo
 import app.dcrux.net.YouTubeRepo
+import app.dcrux.sync.CloudSync
 import app.dcrux.sync.SyncManager
 import app.dcrux.update.Updates
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +42,7 @@ class Graph(
     val updates: Updates by lazy { makeUpdates(this) }
     val weather: WeatherRepo by lazy { WeatherRepo(platform, claude) }
     val mains: MainsStore by lazy { MainsStore(this) }
+    val cloud: CloudSync by lazy { CloudSync(this) }
 
     /** True when this build is set up to use the DCrux service instead of a key on the device. */
     val usesService: Boolean get() = keys.ka.isEmpty() && keys.px.isNotEmpty() && keys.sa.isNotEmpty()

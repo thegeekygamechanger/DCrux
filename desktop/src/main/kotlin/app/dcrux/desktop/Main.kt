@@ -68,6 +68,7 @@ fun main() {
         ImageLoader.Builder(ctx).components { add(OkHttpNetworkFetcherFactory(callFactory = { Http.client })) }.crossfade(true).build()
     }
     host.locked.value = runBlocking { graph.prefs.get().lockEnabled } && graph.secure.hasPin()
+    graph.cloud.start()
     graph.scope.launch {
         val s = graph.prefs.get()
         launch { graph.updates.check() }

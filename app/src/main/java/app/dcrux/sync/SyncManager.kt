@@ -97,6 +97,7 @@ class SyncManager(private val g: Graph) {
             }
 
             if (ok > 0) g.prefs.setLastSync(System.currentTimeMillis())
+            g.cloud.syncSoon()
             state.value = SyncState(
                 running = false, finishedAt = System.currentTimeMillis(),
                 error = when {
@@ -150,6 +151,7 @@ class SyncManager(private val g: Graph) {
     suspend fun removeChannel(id: String) {
         g.db.videos().deleteForChannel(id)
         g.db.channels().delete(id)
+        g.cloud.syncSoon()
     }
 
     companion object {

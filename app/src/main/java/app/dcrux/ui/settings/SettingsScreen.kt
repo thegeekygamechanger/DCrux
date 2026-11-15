@@ -1,5 +1,6 @@
 package app.dcrux.ui.settings
 
+import androidx.compose.material.icons.rounded.Devices
 import app.dcrux.data.wipe
 import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
@@ -464,6 +465,21 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                 }
             }
 
+            if (g.cloud.available) item("cloud") {
+                val cloud by g.cloud.status.collectAsState()
+                Section(
+                    "Sync across devices", Icons.Rounded.Devices,
+                    when {
+                        !cloud.on -> "Off"
+                        cloud.syncing -> "Syncing"
+                        cloud.error != null -> "Could not sync"
+                        settings.cloudLastSync > 0 -> "On · synced " + Dates.ago(settings.cloudLastSync)
+                        else -> "On"
+                    },
+                    openSection == "cloud", { openSection = if (openSection == "cloud") "" else "cloud" },
+                ) { CloudPanel(cloud) }
+            }
+
             item("sync") {
                 Section("Sync", Icons.Rounded.Sync, (if (settings.dailySync) "Daily" else "Manual") + " · last synced " + Dates.ago(settings.lastSync), openSection == "sync", { openSection = if (openSection == "sync") "" else "sync" }) {
                     SwitchRow("Daily auto-sync", "Every morning, in the background", settings.dailySync) {
@@ -599,5 +615,84 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             ) { Text("Delete everything") }
         },
         dismissButton = { TextButton(onClick = { resetAsk = false }) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Pairing this device with the person's others. One makes a code, the rest enter it; from then on
+ * channels, video notes, questions, tests and study settings are the same everywhere.
+ */
+@Composable
+private fun ColumnScope.CloudPanel(cloud: app.dcrux.sync.CloudStatus) {
+    val g = LocalGraph.current
+    val scope = rememberCoroutineScope()
+    var entering by rememberSaveable { mutableStateOf(false) }
+    var typed by rememberSaveable { mutableStateOf("") }
+    var showCode by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var confirmErase by remember { mutableStateOf(false) }
+    val pad = Modifier.padding(horizontal = 18.dp)
+
+    Text(
+        "Keep your channels, video notes, questions, tests and study settings the same on your phone and your computer, with no account. " +
+            "Everything is encrypted on the device with a key made from your code before it is uploaded, so the service stores data it cannot read. " +
+            "PDFs and page photos are never uploaded.",
+        pad.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (!cloud.on) {
+        if (!entering) {
+            Button(enabled = !busy, modifier = pad.fillMaxWidth(), onClick = {
+                busy = true; note = null
+                scope.launch { g.cloud.enable(); busy = false; showCode = true }
+            }) { Text("Turn on sync on this device") }
+            FilledTonalButton(enabled = !busy, modifier = pad.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), onClick = { entering = true; note = null }) { Text("I have a code from another device") }
+        } else {
+            OutlinedTextField(
+                value = typed, onValueChange = { typed = it.take(40) }, modifier = pad.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(24.dp),
+                placeholder = { Text("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX") },
+            )
+            Row(pad.padding(top = 8.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(enabled = !busy && typed.isNotBlank(), onClick = {
+                    busy = true; note = null
+                    scope.launch {
+                        val ok = g.cloud.join(typed)
+                        busy = false
+                        if (ok) { entering = false; typed = "" } else note = "That is not a DCrux code. It is 25 letters and digits; check it against the other device."
+                    }
+                }) { Text("Join") }
+                TextButton(onClick = { entering = false; note = null }) { Text("Cancel") }
+            }
+        }
+    } else {
+        val code = remember(cloud.on) { g.cloud.code().orEmpty() }
+        Text("Your code", pad, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(pad.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (showCode) code else "•••••-•••••-•••••-•••••-•••••", Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            )
+            TextButton(onClick = { showCode = !showCode }) { Text(if (showCode) "Hide" else "Show") }
+        }
+        Text(
+            "Enter this code on your other device under Settings → Sync across devices. Anyone with the code can read your synced data, so keep it to yourself.",
+            pad.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        cloud.error?.let { Text(it, pad.padding(bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        Row(pad.padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(enabled = !cloud.syncing, onClick = { scope.launch { g.cloud.syncNow() } }) { Text(if (cloud.syncing) "Syncing" else "Sync now") }
+            TextButton(onClick = { scope.launch { g.cloud.disable(eraseCloud = false) } }) { Text("Turn off here") }
+        }
+        TextButton(onClick = { confirmErase = true }, modifier = pad.padding(bottom = 8.dp)) { Text("Turn off and erase the stored copy", color = MaterialTheme.colorScheme.error) }
+    }
+    note?.let { Text(it, pad.padding(bottom = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    if (!cloud.on) cloud.error?.let { Text(it, pad.padding(bottom = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+
+    if (confirmErase) AlertDialog(
+        onDismissRequest = { confirmErase = false },
+        title = { Text("Erase the stored copy?") },
+        text = { Text("Sync stops on this device and the encrypted copy on the service is deleted for all your devices. What is on each device stays there.") },
+        confirmButton = { TextButton(onClick = { confirmErase = false; scope.launch { g.cloud.disable(eraseCloud = true) } }) { Text("Erase") } },
+        dismissButton = { TextButton(onClick = { confirmErase = false }) { Text("Keep") } },
     )
 }

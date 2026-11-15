@@ -8,7 +8,7 @@ and the relay adds the key and forwards them.
 
 ## What it allows
 
-- `GET /v1/models` and `POST /v1/messages`, streamed back as they arrive, and `GET /v1/aqi` (official air quality for a city, when a data.gov.in key is set).
+- `GET /v1/models` and `POST /v1/messages`, streamed back as they arrive, `GET /v1/aqi` (official air quality for a city, when a data.gov.in key is set), and `GET`/`PUT`/`DELETE /v1/sync/<id>` (encrypted sync data, when a folder for it is set).
 - Only the models in `DCRUX_MODELS`, a cap on `max_tokens` and request size, and no tools except
   the API's own web search (a few searches per answer, for Ask AI when the material lacks the answer).
 - Only text and inline pictures (the photographed pages of a Mains answer) as content; nothing
@@ -46,6 +46,9 @@ a hash of the install id, the model and the request size.
 | `DCRUX_MAX_IMAGES` | `8` | Pictures allowed in one request |
 | `DCRUX_MAX_SEARCHES` | `3` | Web searches one answer may make (billed per search by the API) |
 | `DCRUX_STATE_FILE` | none | Where to keep the day's counters across restarts |
+| `DCRUX_SYNC_DIR` | none | A folder for sync across a person's devices. Each person's data arrives already encrypted with a key only their devices hold; the relay stores and returns it and cannot read it. Unset means sync is not offered. |
+| `DCRUX_SYNC_MAX_TOTAL_BYTES` | `2000000000` | Ceiling on all stored sync data |
+| `DCRUX_SYNC_WRITES_DAILY` | `600` | Sync uploads per person per day |
 | `DATAGOV_API_KEY` | none | Your free key from data.gov.in. With it, `GET /v1/aqi?city=&lat=&lon=` answers with India's official AQI for the city from the CPCB monitors (cached for an hour). Without it the app shows its own estimate. |
 
 Days are counted in India time.
