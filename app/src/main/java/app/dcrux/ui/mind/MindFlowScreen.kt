@@ -80,6 +80,7 @@ import androidx.core.content.ContextCompat
 import app.dcrux.audio.MindFlow
 import app.dcrux.audio.SoundId
 import app.dcrux.data.Dates
+import app.dcrux.ui.components.bottomBarInset
 import app.dcrux.ui.components.PhotoCarousel
 import app.dcrux.ui.components.Slide
 import app.dcrux.ui.components.TabTitle
@@ -151,7 +152,7 @@ fun MindFlowTab() {
 
     LazyVerticalGrid(
         GridCells.Fixed(2), Modifier.fillMaxSize().statusBarsPadding(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + bottomBarInset()),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(span = { GridItemSpan(2) }) {

@@ -1,6 +1,9 @@
 package app.dcrux.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -9,6 +12,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -34,3 +38,10 @@ fun TabTitle(text: String, modifier: Modifier = Modifier) {
         style = MaterialTheme.typography.headlineLarge.copy(brush = Brush.linearGradient(listOf(c.primary, c.secondary, c.tertiary))),
     )
 }
+
+/**
+ * Room to leave at the bottom of a tab's scrolling content so its last row can be scrolled
+ * clear of the floating bar. The bar has no band of its own; content passes behind it.
+ */
+@Composable
+fun bottomBarInset(): Dp = 84.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()

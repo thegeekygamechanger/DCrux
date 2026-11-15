@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import app.dcrux.ui.components.bottomBarInset
 import app.dcrux.ui.components.TabTitle
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.Storage
@@ -256,7 +257,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
         else ScreenBar("Settings", onBack = { nav.pop() })
         LazyColumn(
             if (asTab) Modifier.weight(1f) else Modifier.weight(1f).navigationBarsPadding(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = if (asTab) 32.dp + bottomBarInset() else 32.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item("crux") {

@@ -14,6 +14,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
@@ -157,40 +158,11 @@ private val tabs = listOf(
 @Composable
 private fun TabsScreen(nav: Nav, settings: Settings, activity: MainActivity) {
     val holder = rememberSaveableStateHolder()
-    Scaffold(
-        modifier = Modifier.appBackground(),
-        containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            // A compact floating pill, only as wide as it needs to be: icons for every tab,
-            // and the name spelled out for the one you are on.
-            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 10.dp, top = 4.dp), contentAlignment = Alignment.Center) {
-                Row(
-                    Modifier.shadow(12.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    tabs.forEachIndexed { i, t ->
-                        val selected = nav.tab == i
-                        val bg by animateColorAsState(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, label = "tabBg")
-                        val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, label = "tabTint")
-                        val scale by animateFloatAsState(if (selected) 1.1f else 1f, spring(dampingRatio = 0.45f, stiffness = 380f), label = "tab")
-                        Row(
-                            Modifier.height(48.dp).clip(CircleShape).background(bg)
-                                .selectable(selected = selected, role = Role.Tab, onClick = { nav.tab = i })
-                                .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 400f))
-                                .padding(horizontal = if (selected) 15.dp else 11.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(if (selected) t.on else t.off, t.label, Modifier.size(24.dp).graphicsLayer { scaleX = scale; scaleY = scale }, tint = tint)
-                            if (selected) Text(t.label, Modifier.padding(start = 8.dp), color = tint, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
-                        }
-                    }
-                }
-            }
-        },
-    ) { pad ->
+    // No bar area: the tab fills the whole screen and the pill floats over it, so nothing
+    // is cut off above the bar and there is no band of background behind it.
+    Box(Modifier.fillMaxSize().appBackground()) {
         AnimatedContent(
-            nav.tab, Modifier.padding(pad).fillMaxSize(),
+            nav.tab, Modifier.fillMaxSize(),
             transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.97f)) togetherWith fadeOut() }, label = "tabs",
         ) { tab ->
             holder.SaveableStateProvider("tab$tab") {
@@ -200,6 +172,33 @@ private fun TabsScreen(nav: Nav, settings: Settings, activity: MainActivity) {
                     2 -> TestsTab(settings)
                     3 -> MindFlowTab()
                     else -> SettingsScreen(settings, asTab = true)
+                }
+            }
+        }
+
+            // A compact floating pill, only as wide as it needs to be: icons for every tab,
+        // and the name spelled out for the one you are on.
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 10.dp), contentAlignment = Alignment.Center) {
+            Row(
+                Modifier.shadow(12.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CircleShape).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tabs.forEachIndexed { i, t ->
+                    val selected = nav.tab == i
+                    val bg by animateColorAsState(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, label = "tabBg")
+                    val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, label = "tabTint")
+                    val scale by animateFloatAsState(if (selected) 1.1f else 1f, spring(dampingRatio = 0.45f, stiffness = 380f), label = "tab")
+                    Row(
+                        Modifier.height(48.dp).clip(CircleShape).background(bg)
+                            .selectable(selected = selected, role = Role.Tab, onClick = { nav.tab = i })
+                            .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 400f))
+                            .padding(horizontal = if (selected) 15.dp else 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(if (selected) t.on else t.off, t.label, Modifier.size(24.dp).graphicsLayer { scaleX = scale; scaleY = scale }, tint = tint)
+                        if (selected) Text(t.label, Modifier.padding(start = 8.dp), color = tint, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+                    }
                 }
             }
         }

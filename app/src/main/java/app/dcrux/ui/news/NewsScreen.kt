@@ -83,6 +83,7 @@ import app.dcrux.net.NewsSource
 import app.dcrux.net.Sources
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
+import app.dcrux.ui.components.bottomBarInset
 import app.dcrux.ui.components.EmptyState
 import app.dcrux.ui.components.PaginationBar
 import app.dcrux.ui.components.TabTitle
@@ -329,5 +330,7 @@ private fun PaperSheet(source: NewsSource, day: String, page: Int, pageCount: In
         CompositionLocalProvider(LocalContentColor provides ink) {
             PaginationBar(page, pageCount, onPage = onPage, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
         }
+        // The sheet runs to the bottom of the screen, under the floating bar; this lets the page numbers scroll clear of it.
+        Spacer(Modifier.height(bottomBarInset()))
     }
 }

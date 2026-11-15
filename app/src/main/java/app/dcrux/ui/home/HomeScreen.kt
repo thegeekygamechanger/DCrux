@@ -86,6 +86,7 @@ import app.dcrux.data.Video
 import app.dcrux.graph
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
+import app.dcrux.ui.components.bottomBarInset
 import app.dcrux.ui.components.CruxCard
 import app.dcrux.ui.settings.UpdatePanel
 import app.dcrux.update.UpdateState
@@ -135,7 +136,7 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
 
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + bottomBarInset()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item("bar") {
