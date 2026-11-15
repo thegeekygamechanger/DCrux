@@ -60,6 +60,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -296,6 +298,16 @@ fun CruxLoader(stage: String, detail: String = "", modifier: Modifier = Modifier
                 )
             )
         }
+    }
+}
+
+/** Stops whatever Crux AI is writing at the moment. The same control everywhere something is being generated. */
+@Composable
+fun StopButton(onClick: () -> Unit, modifier: Modifier = Modifier, label: String = "Stop") {
+    OutlinedButton(onClick = onClick, modifier = modifier, shape = CircleShape) {
+        Icon(Icons.Rounded.Stop, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label)
     }
 }
 

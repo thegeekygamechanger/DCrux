@@ -39,6 +39,8 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import app.dcrux.ui.news.AskSheet
+import androidx.compose.material3.AlertDialog
+import app.dcrux.ui.components.StopButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -99,15 +101,23 @@ fun VideoScreen(videoId: String, settings: Settings) {
     val text = if (detailed) v?.detailed else v?.summary
     val job = jobs[g.ai.videoKey(videoId, detailed)]
 
+    var genJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var confirmFor by remember { mutableStateOf<Boolean?>(null) }
+    fun stop() {
+        genJob?.cancel()
+        g.ai.cancel(g.ai.videoKey(videoId, detailed))
+    }
+
     fun generate(mode: Boolean, fromDescription: Boolean = false, quiet: Boolean = false) {
         val current = video ?: return
         noCaptions = false
-        scope.launch {
+        genJob = scope.launch {
             var captions = transcript
             if (captions == null && !fromDescription) {
                 grabbing = true
                 controller.busy = true
                 AiWork.begin(context.applicationContext)
+                try {
                 // Give the player a moment to come up, then let it load its caption track.
                 withTimeoutOrNull(9_000) { snapshotFlow { playerReady || playerError != null }.first { it } }
                 if (playerReady && playerError == null) {
@@ -123,11 +133,15 @@ fun VideoScreen(videoId: String, settings: Settings) {
                         controller.doneCaptions(restore = !userPlayed)
                     }
                 }
-                grabbing = false
-                controller.busy = false
                 // Hand over to the summary job (which holds the app alive itself) before letting go.
                 if (captions != null) g.ai.summarize(current, mode, captions)
-                AiWork.end(context.applicationContext)
+                } finally {
+                    // Also runs when Stop is pressed while the captions are being read.
+                    if (controller.busy && captions == null) runCatching { controller.doneCaptions(restore = !userPlayed) }
+                    grabbing = false
+                    controller.busy = false
+                    AiWork.end(context.applicationContext)
+                }
                 if (captions != null) return@launch
             }
             // The summary must be of what is said in the video. Without captions, stop and say so.
@@ -136,15 +150,24 @@ fun VideoScreen(videoId: String, settings: Settings) {
         }
     }
 
-    // Opening a video (or flipping the toggle) writes the missing view automatically.
+    // Nothing is written without a yes: opening a video (or flipping the toggle) asks first.
     LaunchedEffect(v?.id, detailed) {
         if (v == null || !hasKey || job != null || grabbing) return@LaunchedEffect
-        if (text == null) {
-            if (started.add(detailed)) generate(detailed)
-        } else if (v.basis == "description" && started.add(detailed)) {
-            // An older text written from the description only: replace it with one from the video itself.
-            generate(detailed, quiet = true)
-        }
+        if (text == null && started.add(detailed)) confirmFor = detailed
+    }
+    confirmFor?.let { mode ->
+        AlertDialog(
+            onDismissRequest = { confirmFor = null },
+            title = { Text(if (mode) "Write detailed notes?" else "Write the summary?") },
+            text = {
+                Text(
+                    "Crux AI will read what is said in this video, write " + (if (mode) "detailed notes" else "the summary") +
+                        ", and then check every point against the video. " + (if (mode) "This takes a minute or two." else "This takes under a minute.") + " You can stop it at any time."
+                )
+            },
+            confirmButton = { Button(onClick = { confirmFor = null; generate(mode) }) { Text("Continue") } },
+            dismissButton = { TextButton(onClick = { confirmFor = null }) { Text("Not now") } },
+        )
     }
 
     // Ask AI about this video: its notes and captions are what the answers rest on.
@@ -223,7 +246,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                                     Tag(
-                                        if (v.basis == "captions") "From what is said in the video" else "From title and description only",
+                                        if (v.basis == "captions") "From what is said in the video, checked against it" else "From title and description only",
                                         bg = if (v.basis == "captions") MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer,
                                         fg = if (v.basis == "captions") MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onErrorContainer,
                                     )
@@ -241,7 +264,10 @@ fun VideoScreen(videoId: String, settings: Settings) {
                                     }
                                 }
                             }
-                            "grab" -> CruxLoader("Listening to the video", "Reading its captions; the player runs muted for a few seconds")
+                            "grab" -> {
+                                CruxLoader("Listening to the video", "Reading its captions; the player runs muted for a few seconds")
+                                StopButton({ stop() }, Modifier.align(Alignment.CenterHorizontally))
+                            }
                             "nocaps" -> {
                                 Text("Could not read this video's captions", style = MaterialTheme.typography.titleMedium)
                                 Spacer(Modifier.height(4.dp))
@@ -255,10 +281,13 @@ fun VideoScreen(videoId: String, settings: Settings) {
                                 TextButton(onClick = { generate(detailed, fromDescription = true) }) { Text("Use only the title and description instead") }
                                 if (text != null) TextButton(onClick = { noCaptions = false }) { Text("Back to the saved text") }
                             }
-                            "run" -> CruxLoader(
-                                job?.stage ?: "Working",
-                                if ((job?.chars ?: 0) > 0) "${job?.chars} characters so far" else "Crux AI is reading and thinking",
-                            )
+                            "run" -> {
+                                CruxLoader(
+                                    job?.stage ?: "Working",
+                                    if ((job?.chars ?: 0) > 0) "${job?.chars} characters so far" else "Crux AI is reading and thinking",
+                                )
+                                StopButton({ stop() }, Modifier.align(Alignment.CenterHorizontally))
+                            }
                             "error" -> {
                                 Text("Could not write this", style = MaterialTheme.typography.titleMedium)
                                 Spacer(Modifier.height(4.dp))

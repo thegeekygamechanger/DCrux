@@ -78,6 +78,7 @@ import app.dcrux.ai.AiRepo
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Stop
 import app.dcrux.graph
 import app.dcrux.ui.components.Markdown
 import kotlinx.coroutines.launch
@@ -132,6 +133,8 @@ fun AskSheet(topic: AiRepo.AskTopic, subtitle: String, onDismiss: () -> Unit) {
         input = ""
     }
     fun openSource(url: String) { onDismiss(); nav.push(Screen.Browser(url, "Source")) }
+    // Fetch the article or captions as the sheet opens, so the first answer does not wait for them.
+    LaunchedEffect(id) { if (ready) g.ai.warm(topic) }
 
     // When a question is asked, bring it to the top of the sheet and leave it there: the answer then
     // grows downward where it can be read from the start, and the view does not jump while text streams in.
@@ -218,7 +221,9 @@ fun AskSheet(topic: AiRepo.AskTopic, subtitle: String, onDismiss: () -> Unit) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { send(input) }),
                 )
                 Spacer(Modifier.width(10.dp))
-                FilledIconButton(onClick = { send(input) }, enabled = ready && !busy && input.isNotBlank(), modifier = Modifier.size(52.dp)) {
+                if (busy) FilledIconButton(onClick = { g.ai.stopAsk(id) }, modifier = Modifier.size(52.dp)) {
+                    Icon(Icons.Rounded.Stop, "Stop the answer")
+                } else FilledIconButton(onClick = { send(input) }, enabled = ready && input.isNotBlank(), modifier = Modifier.size(52.dp)) {
                     Icon(Icons.AutoMirrored.Rounded.Send, "Ask")
                 }
             }

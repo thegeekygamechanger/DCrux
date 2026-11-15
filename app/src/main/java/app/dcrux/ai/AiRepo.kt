@@ -17,6 +17,8 @@ import app.dcrux.data.Video
 import app.dcrux.net.Sources
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -148,24 +150,37 @@ class AiRepo(private val g: Graph) {
                 val basis = if (captions != null) "captions" else "description"
                 val material = captions ?: video.description
                 val task = if (detailed) {
-                    "Write detailed study notes: a \"## \" heading for each topic covered, the key facts, figures, names and " +
-                        "dates exactly as stated, terms explained in a line, and a final \"## Revision checklist\" of 5-8 bullets."
+                    "Write detailed study notes. Give each concept its own \"## \" heading and under it the facts, figures, names, dates, lists and examples the video gives, " +
+                        "as \"- \" bullets with the key term in **bold** and a few words of explanation the first time a term appears. " +
+                        "Keep every exam pointer the speaker gives (previous-year questions, likely questions, memory aids) under the concept it belongs to. " +
+                        "End with a \"## Revision checklist\" of 5-8 bullets a student can test themselves against."
                 } else {
-                    "Write the crux: 6-10 bullet points a student can revise in two minutes, then a short \"## Why it matters\" section."
+                    "Write the crux: 6-10 \"- \" bullets, most important first, each a complete point that stands on its own (the fact and why it matters), " +
+                        "that a student can revise in two minutes. Then a short \"## Why it matters\" section of 2-3 lines on what this means for the exam."
                 }
-                val user = buildString {
+                val context = buildString {
                     append("Video title: ").append(video.title).append('\n')
                     if (channel.isNotBlank()) append("Channel: ").append(channel).append('\n')
                     append("Published: ").append(Dates.longDay(video.publishedAt)).append('\n')
                     append("Source material: ")
                     append(
-                        if (captions != null) "auto-generated captions of the full video (may contain recognition errors; spoken language may be Hindi or mixed)"
+                        if (captions != null) "auto-generated captions of the full video (machine-made, so words, names and numbers can be misheard; the spoken language may be Hindi or mixed)"
                         else "ONLY the title and description; the video itself was not available"
                     )
-                    append("\n<material>\n").append(material).append("\n</material>\n\n")
+                    append("\n<material>\n").append(material).append("\n</material>")
+                }
+                val user = buildString {
                     append(task).append('\n')
                     append("Write in ").append(s.language).append(". Use only Markdown \"## \" headings, \"- \" bullets and **bold**.\n")
                     if (captions != null) {
+                        append("How to write it:\n")
+                        append("- These are the notes a very good teacher would hand out after this class, not a retelling of the video. Organise by concept, in the order that makes the subject easiest to learn, not the order things were said. Merge repetitions. Leave out greetings, promotion, jokes, housekeeping and filler.\n")
+                        append("- Do not narrate: never write \"the teacher says\", \"in this video\", \"he explains\" or the like. State the content itself.\n")
+                        append("- Plain, natural language a first-time reader follows: short sentences, everyday words, one idea per bullet.\n")
+                        append("Accuracy comes before everything else:\n")
+                        append("- Every fact, figure, name, date, list and example must be in the captions. Do not add facts from your own knowledge, even true ones, and do not complete a list the speaker left incomplete.\n")
+                        append("- The captions are machine-made. You may correct the spelling of a name or term they have clearly misheard when you are certain what was said. When a number, name or term is garbled or could be read two ways, do not guess: leave it out, or keep the point and write \"(figure unclear in the video)\".\n")
+                        append("- When the speaker gives an opinion, an estimate or says they are unsure, present it as that, not as fact.\n")
                         append("Make it visual where that helps understanding:\n")
                         append("- Begin with one line of the form `:::image <2-4 English words>` naming a concrete, photographable subject central to the video (a place, institution, object or natural feature), not a living person.\n")
                         append("- Where a process, a sequence of events or a comparison is explained, add a diagram on its own line, in exactly this form: ")
@@ -179,13 +194,19 @@ class AiRepo(private val g: Graph) {
                 }
                 val out = withModel { apiKey, model ->
                     val c = g.claude.complete(
-                        apiKey, model, SYSTEM, user, schema(SUMMARY_SCHEMA),
-                        effort = if (detailed) "medium" else "low",
-                        maxTokens = if (detailed) 24000 else 10000,
+                        apiKey, model, SYSTEM, user, schema(SUMMARY_SCHEMA), effort = "medium",
+                        maxTokens = if (detailed) 24000 else 10000, context = context,
                     ) { text -> setJob(key, AiJob(if (detailed) "Writing detailed notes" else "Writing the crux", text.length)) }
                     decode<SummaryOut>(c.text) to c.model
                 }
-                val (result, model) = out
+                // Second pass: every line is checked against the captions, and anything they do not support is corrected or removed.
+                var checked = out.first.markdown.trim()
+                if (captions != null && checked.isNotBlank()) {
+                    setJob(key, AiJob("Checking every point against the video", checked.length))
+                    checked = runCatching { verified(context, checked) }.getOrElse { if (it is CancellationException) throw it; checked }
+                }
+                val out2 = out.first.copy(markdown = checked) to out.second
+                val (result, model) = out2
                 if (result.markdown.isBlank()) throw ClaudeException(ClaudeException.Kind.PARSE, "empty")
                 if (detailed) g.db.videos().setDetailed(video.id, result.markdown.trim(), basis, model)
                 else g.db.videos().setSummary(video.id, result.markdown.trim(), basis, model)
@@ -200,6 +221,33 @@ class AiRepo(private val g: Graph) {
                 running.remove(key)
             }
         }
+    }
+
+    @Serializable
+    private data class Issue(val quote: String = "", val problem: String = "", val fix: String = "")
+
+    @Serializable
+    private data class IssuesOut(val issues: List<Issue> = emptyList())
+
+    /**
+     * Checks notes against the captions they were written from. The checker returns only the lines
+     * it could not find support for, each with a corrected line (or nothing, to drop it), and those
+     * are applied here. [context] is the same block the notes were written from, so it is read from
+     * the API's cache.
+     */
+    private suspend fun verified(context: String, notes: String): String {
+        val user = "Below are study notes written from the material above. Check them against the material line by line, as a strict fact-checker.\n" +
+            "List every line of the notes that the material does not support: a fact, figure, name, date, list item or claim that is not in the material, contradicts it, " +
+            "goes beyond what was said, or rests on a caption that is clearly garbled. Check the content of any `:::diagram` line the same way.\n" +
+            "For each: quote is that whole line of the notes copied character for character; problem is the reason in a few words; fix is the corrected line that the material does support " +
+            "(same Markdown form as the original line), or an empty string when the line should simply be removed.\n" +
+            "Do not list matters of style, order or wording, and do not add new points. If every line is supported, return an empty list.\n\n<notes>\n" + notes + "\n</notes>"
+        val out = withModel { apiKey, model ->
+            decode<IssuesOut>(g.claude.complete(apiKey, model, SYSTEM, user, schema(ISSUES_SCHEMA), effort = "low", maxTokens = 8000, context = context).text)
+        }
+        if (out.issues.isEmpty()) return notes
+        val fixes = out.issues.filter { it.quote.isNotBlank() }.associate { it.quote.trim() to it.fix.trim() }
+        return notes.lines().mapNotNull { line -> if (line.trim() in fixes) fixes[line.trim()]?.takeIf { it.isNotBlank() } else line }.joinToString("\n").trim()
     }
 
     // ---------------------------------------------------------------- relevance
@@ -524,6 +572,25 @@ class AiRepo(private val g: Graph) {
 
     private val articleTexts = ConcurrentHashMap<String, String>()
 
+    /** The text each open topic rests on, loaded once (when its sheet opens) and reused for every question on it. */
+    private val materials = ConcurrentHashMap<String, String>()
+    private val askJobs = ConcurrentHashMap<String, Job>()
+
+    private suspend fun materialOf(topic: AskTopic): String {
+        materials[topic.id]?.takeIf { it.isNotBlank() }?.let { return it }
+        return topic.material().trim().also { if (it.isNotBlank()) { if (materials.size > 12) materials.clear(); materials[topic.id] = it } }
+    }
+
+    /** Fetches a topic's text ahead of the first question, so the answer does not wait for it. */
+    fun warm(topic: AskTopic) {
+        g.scope.launch { g.claude.warm() }
+        if (materials.containsKey(topic.id)) return
+        g.scope.launch { runCatching { materialOf(topic) } }
+    }
+
+    /** Stops the answer being written for [id]. What had been written so far is kept, marked as unfinished. */
+    fun stopAsk(id: String) { askJobs[id]?.cancel() }
+
     fun clearAsk(id: String) = asking.update { it - id }
 
     fun topicFor(item: NewsItem, sourceName: String) = AskTopic(
@@ -565,18 +632,23 @@ class AiRepo(private val g: Graph) {
         val id = topic.id
         if (q.isEmpty() || asking.value[id]?.let { it.error == null } == true) return
         asking.update { it + (id to AskJob(q)) }
-        g.scope.launch {
+        askJobs[id] = g.scope.launch {
+            // Timings for the debug build only: where an answer's wait is spent.
+            val t0 = System.currentTimeMillis()
+            var firstAt = 0L
+            fun mark(what: String) { if (app.dcrux.BuildConfig.DEBUG) android.util.Log.d("DCruxAsk", "$what at ${System.currentTimeMillis() - t0} ms") }
             try {
                 val s = g.prefs.get()
-                val material = topic.material().trim()
+                val material = materialOf(topic)
+                mark("material ready (${material.length} chars)")
                 val earlier = g.db.asks().latest(id, 4).reversed()
                 val thing = if (topic.kind == "video") "video" else "news item"
                 val user = buildString {
                     append("A student is studying this ").append(thing).append(" and has a question or doubt about it.\n")
                     append("Title: ").append(topic.title).append('\n')
                     if (topic.meta.isNotBlank()) append(topic.meta).append('\n')
-                    if (material.isNotBlank()) append("<material>\n").append(material.take(90_000)).append("\n</material>\n")
-                    else append("The full text could not be loaded, so only the title and the lines above are available.\n")
+                    if (material.isBlank()) append("The full text could not be loaded, so only the title and the lines above are available.\n")
+                    else append("Its text is in the material block above.\n")
                     if (earlier.isNotEmpty()) {
                         append("\nEarlier questions and answers on this:\n")
                         earlier.forEach { append("Q: ").append(it.question).append("\nA: ").append(answerOnly(it.answer).take(1200)).append("\n") }
@@ -586,8 +658,7 @@ class AiRepo(private val g: Graph) {
                     append("Where the answer comes from, in this order:\n")
                     append("1. The material above. Take everything about this ").append(thing).append(" from it.\n")
                     append("2. Well-established syllabus knowledge (the Constitution, institutions, definitions, standard concepts) that you are certain of, to explain or give background.\n")
-                    append("3. Only if 1 and 2 do not answer the question, or it asks for a current fact, date, figure or development you are not certain of: search the web, prefer official and standard sources ")
-                    append("(government sites, PIB, ministries, courts, RBI, UN bodies, NCERT, established newspapers), and state what those pages say.\n")
+                    append(STEP3)
                     append("Never guess and never fill a gap with something plausible. If the material, your certain knowledge and the search still do not give a reliable answer, say plainly that you could not find one and what the student should check.\n")
                     append("How to write it: direct, no preamble, the answer first and then the explanation. Short paragraphs or \"- \" bullets, **bold** for the key terms; \"## \" headings only when the answer has clear parts.\n")
                     append("Make it visual when that helps understanding: for a process, a sequence of events or a comparison add a diagram on its own line, exactly as ")
@@ -597,22 +668,40 @@ class AiRepo(private val g: Graph) {
                     append("End the answer with one line beginning \"Basis:\" that says what it rests on: the ").append(thing).append(", standard syllabus knowledge, or web search.\n")
                     append("After that, add exactly three short follow-up questions this student might ask next, each on its own line beginning with \">> \" and nothing else on that line.")
                 }
+                // First without the web: the search tool, merely by being offered, more than doubles the wait for the first
+                // words (measured), and most questions are answered by the material. The model asks for the web with one
+                // word when it needs it, and only then is the question run again with search switched on.
+                val needsWeb = "3. If 1 and 2 do not answer the question, or it asks for a current fact, date, figure or development you are not certain of, " +
+                    "do not attempt an answer: reply with the single word SEARCH and nothing else. The question will then be given back to you with web search available.\n"
+                val withWeb = "3. 1 and 2 were not enough for this question, so search the web: prefer official and standard sources " +
+                    "(government sites, PIB, ministries, courts, RBI, UN bodies, NCERT, established newspapers), and state what those pages say.\n"
                 suspend fun run(search: Boolean) = withModel { apiKey, model ->
                     g.claude.complete(
-                        apiKey, model, MENTOR_SYSTEM, user, effort = "medium", maxTokens = 12000, showThinking = true, webSearch = search,
+                        // Quick setting: measured at about a second to the first words, against five with the reasoning step,
+                        // on the same model. The grounding rules in the prompt do the work of keeping it right.
+                        apiKey, model, MENTOR_SYSTEM, user.replace(STEP3, if (search) withWeb else needsWeb), effort = "low", maxTokens = 12000, webSearch = search,
+                        context = material.takeIf { it.isNotBlank() }?.let { "<material>\n" + it.take(90_000) + "\n</material>" },
                         onSearching = { asking.update { m -> m + (id to (m[id] ?: AskJob(q)).copy(searching = true)) } },
-                        // The reasoning is the system's own working; only the fact that it is thinking is shown.
-                        onThinking = { asking.update { m -> m + (id to (m[id] ?: AskJob(q)).copy(thinking = "…")) } },
-                        onText = { text -> asking.update { m -> m + (id to (m[id] ?: AskJob(q)).copy(text = text, searching = false)) } },
+                        onText = { text ->
+                            if (firstAt == 0L) { firstAt = System.currentTimeMillis(); mark("first text (search=$search)") }
+                            // The one-word request for the web is not an answer and is never shown.
+                            val asksForWeb = !search && WANTS_WEB.startsWith(text.trim().take(WANTS_WEB.length)) && text.trim().length <= WANTS_WEB.length + 2
+                            asking.update { m -> m + (id to (m[id] ?: AskJob(q)).copy(text = if (asksForWeb) "" else text, searching = text.trim().equals(WANTS_WEB, ignoreCase = true))) }
+                        },
                     )
                 }
-                val done = try {
-                    run(search = true)
-                } catch (e: ClaudeException) {
-                    // Web search can be switched off for the account or the service; the answer is still worth having without it.
-                    if (e.kind != ClaudeException.Kind.BAD_REQUEST && e.kind != ClaudeException.Kind.PERMISSION) throw e
-                    asking.update { m -> m + (id to AskJob(q)) }
-                    run(search = false)
+                mark("request sent")
+                var done = run(search = false)
+                mark("first pass done")
+                if (done.text.trim().trimEnd('.').equals(WANTS_WEB, ignoreCase = true)) {
+                    asking.update { m -> m + (id to AskJob(q, searching = true)) }
+                    done = try {
+                        run(search = true)
+                    } catch (e: ClaudeException) {
+                        // Web search can be switched off for the account or the service: say so rather than guess.
+                        if (e.kind != ClaudeException.Kind.BAD_REQUEST && e.kind != ClaudeException.Kind.PERMISSION) throw e
+                        throw ClaudeException(ClaudeException.Kind.BAD_REQUEST, "This is not covered by the ${thing} and the web search is not available right now, so Crux AI will not guess. Try again later.")
+                    }
                 }
                 val answer = answerOnly(done.text)
                 if (answer.isBlank()) throw ClaudeException(ClaudeException.Kind.PARSE, "empty")
@@ -620,10 +709,17 @@ class AiRepo(private val g: Graph) {
                 g.db.asks().insert(Ask(articleId = id, question = q, answer = stored, askedAt = System.currentTimeMillis(), followups = followupsOf(done.text).joinToString("\n"), topic = topic.title))
                 asking.update { it - id }
             } catch (e: CancellationException) {
+                // Stopped by the student: keep what had been written, clearly marked as unfinished.
+                val partial = answerOnly(asking.value[id]?.text.orEmpty())
+                if (partial.length >= 60) withContext(NonCancellable) {
+                    g.db.asks().insert(Ask(articleId = id, question = q, answer = "$partial\n\n(Stopped before the answer was complete.)", askedAt = System.currentTimeMillis(), topic = topic.title))
+                }
                 asking.update { it - id }
                 throw e
             } catch (e: Exception) {
                 asking.update { it + (id to AskJob(q, error = describe(e))) }
+            } finally {
+                askJobs.remove(id)
             }
         }
     }
@@ -703,6 +799,12 @@ class AiRepo(private val g: Graph) {
         const val MAINS_EVAL_SCHEMA =
             """{"type":"object","properties":{"transcript":{"type":"string"},"legibility":{"type":"integer"},"word_count":{"type":"integer"},"is_answer":{"type":"boolean"},"problem":{"type":"string"},"breakdown":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"score":{"type":"number"},"comment":{"type":"string"}},"required":["criterion","score","comment"],"additionalProperties":false}},"verdict":{"type":"string"},"strengths":$STRS,"improvements":$STRS,"missing":$STRS,"errors":{"type":"array","items":{"type":"object","properties":{"written":{"type":"string"},"issue":{"type":"string"}},"required":["written","issue"],"additionalProperties":false}},"structure":{"type":"string"},"outline":$STRS,"exam_tips":$STRS,"time_advice":{"type":"string"},"marked":{"type":"array","items":{"type":"object","properties":{"page":{"type":"integer"},"section":{"type":"string"},"text":{"type":"string"},"mark":{"type":"string","enum":["good","partial","wrong","weak"]},"remark":{"type":"string"}},"required":["page","section","text","mark","remark"],"additionalProperties":false}}},"required":["transcript","legibility","word_count","is_answer","problem","breakdown","verdict","strengths","improvements","missing","errors","structure","outline","exam_tips","time_advice","marked"],"additionalProperties":false}"""
 
+        /** Stands in the prompt for the instruction on what to do when the material does not hold the answer. */
+        private const val STEP3 = "[[step-3]]\n"
+
+        /** The one word the model answers with when a question needs the web. */
+        private const val WANTS_WEB = "SEARCH"
+
         /** Marks a line stored with an answer that names a web page it rests on: title | link. */
         const val SRC = "[[source]] "
 
@@ -733,6 +835,9 @@ class AiRepo(private val g: Graph) {
 
         const val SUMMARY_SCHEMA =
             """{"type":"object","properties":{"markdown":{"type":"string"},"relevance":$REL},"required":["markdown","relevance"],"additionalProperties":false}"""
+
+        const val ISSUES_SCHEMA =
+            """{"type":"object","properties":{"issues":{"type":"array","items":{"type":"object","properties":{"quote":{"type":"string"},"problem":{"type":"string"},"fix":{"type":"string"}},"required":["quote","problem","fix"],"additionalProperties":false}}},"required":["issues"],"additionalProperties":false}"""
 
         const val RATE_SCHEMA =
             """{"type":"object","properties":{"items":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"note":{"type":"string"},"relevance":$REL},"required":["id","note","relevance"],"additionalProperties":false}}},"required":["items"],"additionalProperties":false}"""

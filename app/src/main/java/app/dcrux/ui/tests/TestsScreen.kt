@@ -121,6 +121,7 @@ import app.dcrux.ui.components.CruxLoader
 import app.dcrux.ui.components.EmptyState
 import app.dcrux.ui.components.PaginationBar
 import app.dcrux.ui.components.Stars
+import app.dcrux.ui.components.StopButton
 import app.dcrux.ui.components.Tag
 import app.dcrux.ui.components.TabTitle
 import app.dcrux.ui.components.appBackground
@@ -197,6 +198,7 @@ fun TestsTab(settings: Settings) {
     var mainsCount by rememberSaveable { mutableIntStateOf(2) }
     var marks by rememberSaveable { mutableIntStateOf(10) }
     var busy by remember { mutableStateOf(false) }
+    var buildJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var optionsOpen by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     // History lists every test, labelled by type; it has its own filter and order.
@@ -294,6 +296,7 @@ fun TestsTab(settings: Settings) {
                     if (busy) {
                         if (mains) CruxLoader("Setting your Mains questions", "$mainsCount questions of $marks marks for ${shortExam(exam)}")
                         else CruxLoader("Writing your test", "$count $difficulty questions for ${shortExam(exam)}")
+                        StopButton({ buildJob?.cancel(); busy = false }, Modifier.align(Alignment.CenterHorizontally))
                         return@Column
                     }
                     Text(if (mains) "New Mains set" else "New test", style = MaterialTheme.typography.titleLarge)
@@ -357,7 +360,7 @@ fun TestsTab(settings: Settings) {
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                     fun generate() {
                         busy = true; error = null
-                        scope.launch {
+                        buildJob = scope.launch {
                             try {
                                 val title = "${shortExam(exam)} · ${Dates.prettyDay(day)}"
                                 if (mains) {
@@ -370,6 +373,8 @@ fun TestsTab(settings: Settings) {
                                 }
                             } catch (e: ClaudeException) {
                                 error = e.friendly
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 error = e.message ?: "Could not build the test"
                             } finally {

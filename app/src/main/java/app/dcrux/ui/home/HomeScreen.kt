@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import app.dcrux.net.WeatherRepo
+import app.dcrux.sync.STOPPED
 import app.dcrux.ui.theme.LocalExtra
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.Shadow
 import java.util.Locale
 import kotlin.math.roundToInt
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.MoreVert
@@ -215,7 +217,10 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
                         sync.running -> {
                             LinearWavyProgressIndicator(Modifier.fillMaxWidth())
                             Spacer(Modifier.height(6.dp))
-                            Text(sync.message.ifBlank { "Syncing" }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(sync.message.ifBlank { "Syncing" }, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                TextButton(onClick = { g.sync.stop() }) { Icon(Icons.Rounded.Stop, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Stop") }
+                            }
                         }
                         showError -> Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(sync.error.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
@@ -224,7 +229,7 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
                         justSynced -> Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.CheckCircle, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(6.dp))
-                            Text("Synced", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Text(if (sync.message == STOPPED) "Sync stopped" else "Synced", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                     shareMessage?.let {

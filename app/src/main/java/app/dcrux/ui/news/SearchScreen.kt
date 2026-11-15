@@ -76,6 +76,7 @@ import app.dcrux.ui.components.FancySwitch
 import app.dcrux.ui.components.Markdown
 import app.dcrux.ui.components.PaginationBar
 import app.dcrux.ui.components.RelevancePill
+import app.dcrux.ui.components.StopButton
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -188,9 +189,14 @@ fun SearchSheet(settings: Settings, onDismiss: () -> Unit) {
                             Spacer(Modifier.height(6.dp))
                             when {
                                 overviewError != null -> Text(overviewError.orEmpty(), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                                overview.isNullOrBlank() -> CruxLoader("Reading your results")
+                                overview.isNullOrBlank() -> {
+                                    CruxLoader("Reading your results")
+                                    StopButton({ overviewJob?.cancel(); overviewBusy = false; overview = null; aiOn = false })
+                                }
                                 else -> {
                                     Markdown(overview.orEmpty(), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    // Still being written: it can be stopped where it is.
+                                    if (overviewBusy) StopButton({ overviewJob?.cancel(); overviewBusy = false }, Modifier.padding(top = 8.dp))
                                     Text(
                                         "Numbers in brackets refer to the results below, in order. Written only from them.",
                                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),

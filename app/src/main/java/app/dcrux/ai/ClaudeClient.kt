@@ -89,6 +89,18 @@ class ClaudeClient {
         return builder.header("anthropic-version", VERSION).apply { if (beta != null) header("anthropic-beta", beta) }
     }
 
+    /**
+     * Opens the connection to the AI service ahead of a question, so the first answer does not also
+     * wait for the connection to be set up. It sends nothing about the user and its result is ignored.
+     */
+    suspend fun warm() = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = service?.let { it.baseUrl + "/health" } ?: BASE
+            Http.streaming.newCall(Request.Builder().url(url).head().build()).execute().close()
+        }
+        Unit
+    }
+
     /** Lists the models this key can use, with the capabilities DCrux adapts to. Doubles as the key test. */
     suspend fun listModels(apiKey: String): List<ModelInfo> = withContext(Dispatchers.IO) {
         val out = mutableListOf<ModelInfo>()
@@ -140,6 +152,11 @@ class ClaudeClient {
         showThinking: Boolean = false,
         /** JPEG pictures to show the model ahead of the text (photos of a handwritten answer). */
         images: List<ByteArray> = emptyList(),
+        /**
+         * A long piece of source text (captions, an article) sent ahead of [user] and marked for the API's
+         * prompt cache, so a second request about the same text starts faster and costs less.
+         */
+        context: String? = null,
         /** Lets the model look things up on the web (a few searches at most) when the material does not hold the answer. */
         webSearch: Boolean = false,
         onSearching: () -> Unit = {},
@@ -156,8 +173,12 @@ class ClaudeClient {
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "user")
-                    if (images.isEmpty()) put("content", prompt)
+                    if (images.isEmpty() && context.isNullOrBlank()) put("content", prompt)
                     else put("content", buildJsonArray {
+                        if (!context.isNullOrBlank()) add(buildJsonObject {
+                            put("type", "text"); put("text", context)
+                            putJsonObject("cache_control") { put("type", "ephemeral") }
+                        })
                         images.forEach { jpeg ->
                             add(buildJsonObject {
                                 put("type", "image")

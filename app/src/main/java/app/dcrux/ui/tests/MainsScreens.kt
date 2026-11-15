@@ -96,6 +96,7 @@ import app.dcrux.ui.ScreenBar
 import app.dcrux.ui.components.CruxCard
 import app.dcrux.ui.components.CruxLoader
 import app.dcrux.ui.components.PaginationBar
+import app.dcrux.ui.components.StopButton
 import app.dcrux.ui.components.Tag
 import app.dcrux.ui.components.appBackground
 import app.dcrux.ui.theme.LocalExtra
@@ -201,6 +202,7 @@ fun MainsRunScreen() {
                     }
                 } else {
                     CruxLoader(p.stage.ifBlank { "Evaluating" }, "${p.done} of ${p.total} answers evaluated")
+                    StopButton({ g.mains.stopEvaluation() })
                     Spacer(Modifier.height(12.dp))
                     Text(
                         "Each answer is read word by word and then marked, which takes about a minute. You can leave this screen; the result will be waiting in Tests.",

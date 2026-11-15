@@ -282,6 +282,12 @@ class MainsStore(private val g: Graph) {
 
     fun clearProgress() { progress.value = null }
 
+    /** Stops an evaluation in progress. The pages and the answers already evaluated are kept, so it can be started again. */
+    fun stopEvaluation() {
+        job?.cancel()
+        if (progress.value?.running == true) progress.value = null
+    }
+
     /** Evaluates every answered question and saves the result. Keeps going if the screen is left. */
     fun evaluate() {
         if (progress.value?.running == true) return

@@ -18,6 +18,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import java.util.concurrent.TimeUnit
 
+/** The message a sync ends with when the user stopped it. */
+const val STOPPED = "Stopped"
+
 data class SyncState(val running: Boolean = false, val message: String = "", val error: String? = null, val finishedAt: Long = 0)
 
 data class AddReport(val added: List<String>, val failed: List<Pair<String, String>>)
@@ -26,8 +29,15 @@ class SyncManager(private val g: Graph) {
     val state = MutableStateFlow(SyncState())
     private val mutex = Mutex()
 
+    private var job: kotlinx.coroutines.Job? = null
+
     fun syncNow() {
-        g.scope.launch { run() }
+        job = g.scope.launch { run() }
+    }
+
+    /** Stops a sync that is under way. What it had already fetched stays. */
+    fun stop() {
+        job?.cancel()
     }
 
     private suspend fun seedDefault() {
@@ -106,6 +116,9 @@ class SyncManager(private val g: Graph) {
                 },
             )
             return ok > 0
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            state.value = SyncState(running = false, message = STOPPED, finishedAt = System.currentTimeMillis())
+            throw e
         } finally {
             mutex.unlock()
         }
