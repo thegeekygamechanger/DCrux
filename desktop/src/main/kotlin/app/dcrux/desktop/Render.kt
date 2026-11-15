@@ -34,8 +34,9 @@ fun main(args: Array<String>) {
     SingletonImageLoader.setSafe { ctx -> ImageLoader.Builder(ctx).components { add(OkHttpNetworkFetcherFactory(callFactory = { Http.client })) }.build() }
     if (args.getOrNull(2) == "sync") { println("sync ok: " + graph.sync.run()) }
 
-    val width = 960; val height = 1840
-    val scene = ImageComposeScene(width, height, Density(2f)) { Box(Modifier.fillMaxSize()) { DCruxRoot(host) } }
+    // -Drender.size=1920x1080x1 draws a landscape window; the default is a phone-shaped one at double density.
+    val (width, height, scale) = System.getProperty("render.size", "960x1840x2").split('x').let { Triple(it[0].toInt(), it[1].toInt(), it.getOrElse(2) { "1" }.toFloat()) }
+    val scene = ImageComposeScene(width, height, Density(scale)) { Box(Modifier.fillMaxSize()) { DCruxRoot(host) } }
     var clock = 0L
     suspend fun settle(ms: Long) { val end = clock + ms; while (clock < end) { scene.render(clock * 1_000_000); clock += 32; delay(8) } }
     fun shot(name: String) {

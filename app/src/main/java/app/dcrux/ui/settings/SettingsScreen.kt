@@ -1,5 +1,9 @@
 package app.dcrux.ui.settings
 
+import androidx.compose.foundation.layout.widthIn
+import app.dcrux.ui.components.QrCode
+import androidx.compose.material.icons.rounded.QrCodeScanner
+import app.dcrux.ui.components.CruxList
 import androidx.compose.material.icons.rounded.Devices
 import app.dcrux.data.wipe
 import app.dcrux.LocalGraph
@@ -246,10 +250,10 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
     Column(Modifier.fillMaxSize().appBackground().statusBarsPadding().imePadding()) {
         if (asTab) TabTitle("Settings", Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp))
         else ScreenBar("Settings", onBack = { nav.pop() })
-        LazyColumn(
+        CruxList(
             if (asTab) Modifier.weight(1f) else Modifier.weight(1f).navigationBarsPadding(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = if (asTab) 32.dp + bottomBarInset() else 32.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            spacing = 10.dp, minColumn = 460.dp,
         ) {
             item("crux") {
                 Section("Your crux", Icons.Rounded.AutoAwesome, if (channels.isEmpty()) "No channels yet" else channels.joinToString(", ") { it.title }, openSection == "crux", { openSection = if (openSection == "crux") "" else "crux" }) {
@@ -629,10 +633,18 @@ private fun ColumnScope.CloudPanel(cloud: app.dcrux.sync.CloudStatus) {
     var entering by rememberSaveable { mutableStateOf(false) }
     var typed by rememberSaveable { mutableStateOf("") }
     var showCode by remember { mutableStateOf(false) }
+    // Shown straight away on a computer (that is how a phone joins it); behind a tap on a phone, which is more often seen by others.
+    var showQr by remember { mutableStateOf(g.platform.isDesktop) }
     var busy by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
     var confirmErase by remember { mutableStateOf(false) }
     val pad = Modifier.padding(horizontal = 18.dp)
+    // Reading the other device's QR code with the camera (phones only); the code can always be typed instead.
+    val scan = g.platform.rememberQrScanner { scanned ->
+        val code = scanned?.let { app.dcrux.sync.CloudSync.fromQr(it) }
+        if (code == null) note = if (scanned == null) "No QR code could be read from that photo. Fill the frame with the code, hold steady, and try again, or type the code." else "That QR code is not a DCrux sync code."
+        else { busy = true; scope.launch { g.cloud.join(code); busy = false } }
+    }
 
     Text(
         "Keep your channels, video notes, questions, tests and study settings the same on your phone and your computer, with no account. " +
@@ -646,7 +658,10 @@ private fun ColumnScope.CloudPanel(cloud: app.dcrux.sync.CloudStatus) {
                 busy = true; note = null
                 scope.launch { g.cloud.enable(); busy = false; showCode = true }
             }) { Text("Turn on sync on this device") }
-            FilledTonalButton(enabled = !busy, modifier = pad.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), onClick = { entering = true; note = null }) { Text("I have a code from another device") }
+            if (scan != null) FilledTonalButton(enabled = !busy, modifier = pad.fillMaxWidth().padding(top = 6.dp), onClick = { note = null; scan() }) {
+                Icon(Icons.Rounded.QrCodeScanner, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Scan the QR code on another device")
+            }
+            FilledTonalButton(enabled = !busy, modifier = pad.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), onClick = { entering = true; note = null }) { Text("Type a code from another device") }
         } else {
             OutlinedTextField(
                 value = typed, onValueChange = { typed = it.take(40) }, modifier = pad.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(24.dp),
@@ -666,6 +681,13 @@ private fun ColumnScope.CloudPanel(cloud: app.dcrux.sync.CloudStatus) {
         }
     } else {
         val code = remember(cloud.on) { g.cloud.code().orEmpty() }
+        Text(
+            if (g.platform.isDesktop) "On your phone: Settings → Sync across devices → Scan the QR code on another device, then photograph this:"
+            else "To add another device, scan this from it, or type the code below:",
+            pad.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (showQr) QrCode(app.dcrux.sync.CloudSync.qrText(code), pad.widthIn(max = 260.dp).fillMaxWidth().padding(bottom = 4.dp))
+        TextButton(onClick = { showQr = !showQr }, modifier = pad) { Text(if (showQr) "Hide the QR code" else "Show the QR code") }
         Text("Your code", pad, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(pad.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -675,7 +697,7 @@ private fun ColumnScope.CloudPanel(cloud: app.dcrux.sync.CloudStatus) {
             TextButton(onClick = { showCode = !showCode }) { Text(if (showCode) "Hide" else "Show") }
         }
         Text(
-            "Enter this code on your other device under Settings → Sync across devices. Anyone with the code can read your synced data, so keep it to yourself.",
+            "Anyone with this code or its QR code can read your synced data, so keep both to yourself.",
             pad.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         cloud.error?.let { Text(it, pad.padding(bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }

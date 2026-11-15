@@ -1,5 +1,17 @@
 package app.dcrux
 
+import kotlinx.coroutines.launch
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.common.GlobalHistogramBinarizer
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.DecodeHintType
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.BarcodeFormat
+import androidx.core.content.FileProvider
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
+import android.graphics.BitmapFactory
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -186,6 +198,53 @@ class AndroidPlatform(private val app: Application) : Platform {
         val shot by rememberUpdatedState(onShot)
         val launcher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { _ -> shot() }
         return { target -> launcher.launch(target as Uri) }
+    }
+
+    /**
+     * The phone's own camera app takes a picture of the code and the picture is read here, so DCrux needs
+     * no camera permission and no scanning service. The picture is deleted as soon as it has been read.
+     */
+    @Composable
+    override fun rememberQrScanner(onResult: (String?) -> Unit): (() -> Unit)? {
+        val result by rememberUpdatedState(onResult)
+        val scope = rememberCoroutineScope()
+        val file = remember { File(File(app.filesDir, "scan").apply { mkdirs() }, "qr.jpg") }
+        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { _ ->
+            scope.launch {
+                val text = withContext(Dispatchers.Default) { runCatching { readQr(file) }.getOrNull() }
+                file.delete()
+                result(text)
+            }
+        }
+        return {
+            runCatching {
+                file.delete(); file.createNewFile()
+                launcher.launch(FileProvider.getUriForFile(app, "${app.packageName}.capture", file))
+            }.onFailure { result(null) }
+        }
+    }
+
+    /** Finds a QR code in a photograph. A photo of a screen can be large and soft, so it is tried at a few sizes. */
+    private fun readQr(photo: File): String? {
+        if (photo.length() == 0L) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(photo.path, bounds)
+        val longEdge = maxOf(bounds.outWidth, bounds.outHeight)
+        if (longEdge <= 0) return null
+        val hints = mapOf(DecodeHintType.TRY_HARDER to true, DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE))
+        for (target in listOf(1600, 1000, 2400, 640)) {
+            var sample = 1
+            while (longEdge / (sample * 2) >= target) sample *= 2
+            val bmp = BitmapFactory.decodeFile(photo.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: continue
+            val pixels = IntArray(bmp.width * bmp.height)
+            bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+            val source = RGBLuminanceSource(bmp.width, bmp.height, pixels)
+            bmp.recycle()
+            for (bitmap in listOf(BinaryBitmap(HybridBinarizer(source)), BinaryBitmap(GlobalHistogramBinarizer(source)))) {
+                runCatching { return MultiFormatReader().decode(bitmap, hints).text }
+            }
+        }
+        return null
     }
 
     override fun clipboardText(): String? {

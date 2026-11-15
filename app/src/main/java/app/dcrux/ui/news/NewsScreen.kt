@@ -1,5 +1,7 @@
 package app.dcrux.ui.news
 
+import app.dcrux.ui.components.LocalWide
+import androidx.compose.foundation.layout.BoxWithConstraints
 import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -170,7 +172,8 @@ private fun ColumnScope.PaperView(sources: List<NewsSource>, source: NewsSource,
     val dayList = days ?: return
     val day = pickedDay?.takeIf { it in dayList } ?: dayList.firstOrNull() ?: Dates.dayKey()
     val minScore = if (picks) 60 else -1
-    val size = settings.pageSize
+    // A wide sheet is set in columns, so it carries more headlines to the page.
+    val size = settings.pageSize * if (LocalWide.current) 3 else 1
     val total by remember(source.id, day, minScore) { g.db.news().count(source.id, day, minScore) }.collectAsState(initial = 0)
     val unrated by remember(source.id, day) { g.db.news().unratedCount(source.id, day) }.collectAsState(initial = 0)
     val jobs by g.ai.jobs.collectAsState()
@@ -283,44 +286,54 @@ private fun PaperSheet(source: NewsSource, day: String, page: Int, pageCount: In
             Text("Page ${page + 1} of $pageCount", color = ink.copy(alpha = 0.75f), style = MaterialTheme.typography.labelMedium)
         }
         HorizontalDivider(thickness = 1.dp, color = ink.copy(alpha = 0.5f))
-        items.forEachIndexed { i, n ->
-            Column(Modifier.fillMaxWidth().clickable { nav.push(Screen.Browser(n.link, source.name)) }.padding(vertical = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Tag(n.section, bg = accent.copy(alpha = 0.16f), fg = if (dark) Color.White else accent)
-                    RelevancePill(n.relevance)
-                    Spacer(Modifier.weight(1f))
-                    Text(Dates.time(n.publishedAt), color = ink.copy(alpha = 0.6f), style = MaterialTheme.typography.labelSmall)
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(n.title, color = ink, style = MaterialTheme.typography.titleLarge.copy(fontFamily = Heros))
-                if (n.snippet.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(n.snippet, color = ink.copy(alpha = 0.82f), style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                }
-                if (!n.note.isNullOrBlank()) {
-                    Spacer(Modifier.height(6.dp))
-                    Row {
-                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.padding(top = 2.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(6.dp))
-                        Text(n.note, color = ink.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic))
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val columns = (maxWidth / 440.dp).toInt().coerceIn(1, 3)
+            Column {
+                items.chunked(columns).forEachIndexed { r, line ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                        line.forEach { n ->
+                            Column(Modifier.weight(1f).clickable { nav.push(Screen.Browser(n.link, source.name)) }.padding(vertical = 12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Tag(n.section, bg = accent.copy(alpha = 0.16f), fg = if (dark) Color.White else accent)
+                                    RelevancePill(n.relevance)
+                                    Spacer(Modifier.weight(1f))
+                                    Text(Dates.time(n.publishedAt), color = ink.copy(alpha = 0.6f), style = MaterialTheme.typography.labelSmall)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Text(n.title, color = ink, style = MaterialTheme.typography.titleLarge.copy(fontFamily = Heros))
+                                if (n.snippet.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(n.snippet, color = ink.copy(alpha = 0.82f), style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (!n.note.isNullOrBlank()) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Row {
+                                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.padding(top = 2.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(n.note, color = ink.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic))
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val asked by remember(n.id) { g.db.asks().count(n.id) }.collectAsState(initial = 0)
+                                    FilledTonalButton(onClick = { askAbout = n }, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)) {
+                                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+                                        Text(if (asked > 0) "Ask Crux AI · $asked" else "Ask Crux AI")
+                                    }
+                                    Spacer(Modifier.weight(1f))
+                                    ReadModeButton(onClick = {
+                                        nav.push(Screen.Reader(n.title, n.snippet, "${source.name} · ${n.section} · ${Dates.dateTime(n.publishedAt)}", n.link, n.relevance, n.note, askId = n.id))
+                                    })
+                                    IconButton(onClick = { nav.push(Screen.Browser(n.link, source.name)) }) {
+                                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Read at the source", tint = ink.copy(alpha = 0.8f))
+                                    }
+                                }
+                            }
+                        }
+                        repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }
                     }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val asked by remember(n.id) { g.db.asks().count(n.id) }.collectAsState(initial = 0)
-                    FilledTonalButton(onClick = { askAbout = n }, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)) {
-                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
-                        Text(if (asked > 0) "Ask Crux AI · $asked" else "Ask Crux AI")
-                    }
-                    Spacer(Modifier.weight(1f))
-                    ReadModeButton(onClick = {
-                        nav.push(Screen.Reader(n.title, n.snippet, "${source.name} · ${n.section} · ${Dates.dateTime(n.publishedAt)}", n.link, n.relevance, n.note, askId = n.id))
-                    })
-                    IconButton(onClick = { nav.push(Screen.Browser(n.link, source.name)) }) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Read at the source", tint = ink.copy(alpha = 0.8f))
-                    }
+                    if (r < (items.size - 1) / columns) HorizontalDivider(color = ink.copy(alpha = 0.18f))
                 }
             }
-            if (i < items.lastIndex) HorizontalDivider(color = ink.copy(alpha = 0.18f))
         }
         // Page numbers sit at the foot of the sheet and scroll with it, leaving the screen to the news.
         HorizontalDivider(color = ink.copy(alpha = 0.18f))

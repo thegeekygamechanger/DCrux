@@ -1,5 +1,12 @@
 package app.dcrux.ui
 
+import app.dcrux.ui.components.LocalWide
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
 import app.dcrux.LocalGraph
 import app.dcrux.Host
 import androidx.compose.animation.AnimatedContent
@@ -100,6 +107,10 @@ fun DCruxRoot(host: Host) {
         CompositionLocalProvider(LocalNav provides nav) {
             // A Surface (not a plain background) so text everywhere defaults to the theme's on-surface colour.
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface) {
+              BoxWithConstraints(Modifier.fillMaxSize()) {
+                // A computer window wide enough for it gets the landscape layout; narrowed, it falls back to the phone's.
+                val wide = g.platform.isDesktop && maxWidth >= 900.dp
+                CompositionLocalProvider(LocalWide provides wide) {
                 AnimatedContent(
                     host.locked.value,
                     transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.96f)) togetherWith (fadeOut() + scaleOut(targetScale = 1.04f)) },
@@ -108,6 +119,8 @@ fun DCruxRoot(host: Host) {
                     if (locked) LockScreen(settings.biometric) { host.locked.value = false }
                     else AppNav(nav, settings, host)
                 }
+                }
+              }
             }
         }
     }
@@ -137,6 +150,7 @@ private fun AppNav(nav: Nav, settings: Settings, host: Host) {
         label = "nav",
     ) { (depth, screen) ->
         holder.SaveableStateProvider("$depth:${screen.hashCode()}") {
+            val page: @Composable () -> Unit = {
             when (screen) {
                 Screen.Tabs -> TabsScreen(nav, settings, host)
                 is Screen.VideoDetail -> VideoScreen(screen.id, settings)
@@ -149,6 +163,13 @@ private fun AppNav(nav: Nav, settings: Settings, host: Host) {
                 Screen.MainsRun -> MainsRunScreen()
                 is Screen.PdfPreview -> PdfPreviewScreen(screen.id)
             }
+            }
+            // In landscape, pages meant for reading keep a comfortable width in the middle of the window.
+            if (LocalWide.current && screen != Screen.Tabs) {
+                Box(Modifier.fillMaxSize().appBackground(), contentAlignment = Alignment.TopCenter) {
+                    Box(Modifier.widthIn(max = 1040.dp).fillMaxHeight()) { page() }
+                }
+            } else page()
         }
     }
 }
@@ -168,9 +189,10 @@ private fun TabsScreen(nav: Nav, settings: Settings, host: Host) {
     val holder = rememberSaveableStateHolder()
     // No bar area: the tab fills the whole screen and the pill floats over it, so nothing
     // is cut off above the bar and there is no band of background behind it.
+    val wide = LocalWide.current
     Box(Modifier.fillMaxSize().appBackground()) {
         AnimatedContent(
-            nav.tab, Modifier.fillMaxSize(),
+            nav.tab, if (wide) Modifier.fillMaxSize().padding(start = 212.dp) else Modifier.fillMaxSize(),
             transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.97f)) togetherWith fadeOut() }, label = "tabs",
         ) { tab ->
             holder.SaveableStateProvider("tab$tab") {
@@ -184,9 +206,30 @@ private fun TabsScreen(nav: Nav, settings: Settings, host: Host) {
             }
         }
 
+        // Landscape: the same five places as a rail down the left side, each with its name.
+        if (wide) Column(
+            Modifier.align(Alignment.CenterStart).padding(start = 16.dp).width(180.dp).clip(RoundedCornerShape(32.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh).border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), RoundedCornerShape(32.dp)).padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            tabs.forEachIndexed { i, t ->
+                val selected = nav.tab == i
+                val bg by animateColorAsState(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, label = "railBg")
+                val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, label = "railTint")
+                Row(
+                    Modifier.fillMaxWidth().height(52.dp).clip(CircleShape).background(bg)
+                        .selectable(selected = selected, role = Role.Tab, onClick = { nav.tab = i }).padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(if (selected) t.on else t.off, null, Modifier.size(24.dp), tint = tint)
+                    Text(t.label, Modifier.padding(start = 12.dp), color = tint, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
+            }
+        }
+
             // A compact floating pill, only as wide as it needs to be: icons for every tab,
         // and the name spelled out for the one you are on.
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 10.dp), contentAlignment = Alignment.Center) {
+        if (!wide) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 10.dp), contentAlignment = Alignment.Center) {
             Row(
                 Modifier.shadow(12.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CircleShape).padding(6.dp),

@@ -1,5 +1,6 @@
 package app.dcrux.ui.home
 
+import androidx.compose.foundation.layout.widthIn
 import app.dcrux.ui.OnBack
 import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedContent
@@ -87,7 +88,7 @@ fun Tour(onTab: (Int) -> Unit) {
         contentAlignment = Alignment.BottomCenter,
     ) {
         Surface(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 16.dp),
+            Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 16.dp),
             shape = RoundedCornerShape(32.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 6.dp,
         ) {
             Column(Modifier.padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {

@@ -1,5 +1,6 @@
 package app.dcrux.ui.mind
 
+import app.dcrux.ui.components.LocalWide
 import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -137,16 +138,16 @@ fun MindFlowTab() {
     val ensureNotifications = g.platform.rememberNotificationAsk()
 
     LazyVerticalGrid(
-        GridCells.Fixed(2), Modifier.fillMaxSize().statusBarsPadding(),
+        if (LocalWide.current) GridCells.Adaptive(250.dp) else GridCells.Fixed(2), Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + bottomBarInset()),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item(span = { GridItemSpan(2) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
                 TabTitle("Mind Flow")
             }
         }
-        item(span = { GridItemSpan(2) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             val day = remember(Dates.dayKey()) { Dates.dayOfEpoch().toInt() }
             val slides = remember(day) {
                 List(5) { i ->
@@ -156,7 +157,7 @@ fun MindFlowTab() {
             }
             PhotoCarousel("Daily calm", Icons.Rounded.Spa, slides, day)
         }
-        item(span = { GridItemSpan(2) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 presets.forEach { (name, mix) ->
                     AssistChip(onClick = { ensureNotifications(); sounds.setMix(mix) }, label = { Text(name) }, shape = CircleShape)
@@ -166,7 +167,7 @@ fun MindFlowTab() {
         items(SoundId.entries.toList(), key = { it.name }) { id ->
             SoundCard(id, levels[id] ?: 0f) { level -> if (level > 0f) ensureNotifications(); sounds.set(id, level) }
         }
-        item(span = { GridItemSpan(2) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary)

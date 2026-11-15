@@ -361,6 +361,14 @@ class CloudSync(private val g: Graph) {
 
         private fun newCode(): String = SecureRandom().let { r -> (1..LENGTH).map { ALPHABET[r.nextInt(32)] }.joinToString("") }
 
+        private const val QR_PREFIX = "dcrux-sync:"
+
+        /** What a pairing QR code holds: the code itself, marked so nothing else is mistaken for one. */
+        fun qrText(prettyCode: String): String = QR_PREFIX + prettyCode
+
+        /** The pairing code inside a scanned QR code, or null when the QR code is not a DCrux one. */
+        fun fromQr(scanned: String): String? = scanned.trim().takeIf { it.startsWith(QR_PREFIX) }?.removePrefix(QR_PREFIX)?.let(::normalise)
+
         /** As shown to the user: five groups of five. */
         fun pretty(secret: String): String = secret.chunked(5).joinToString("-")
 

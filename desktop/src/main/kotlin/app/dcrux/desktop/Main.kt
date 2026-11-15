@@ -77,9 +77,9 @@ fun main() {
     }
 
     application {
-        // A phone-shaped window by default: the app is the same single column on every screen.
-        val state = rememberWindowState(size = DpSize(480.dp, 920.dp))
-        LaunchedEffect(platform.fullScreen) { state.placement = if (platform.fullScreen) WindowPlacement.Fullscreen else WindowPlacement.Floating }
+        // Opens filling the screen in the landscape layout; made narrow, it turns into the phone's single column.
+        val state = rememberWindowState(placement = WindowPlacement.Maximized, size = DpSize(1280.dp, 800.dp))
+        LaunchedEffect(platform.fullScreen) { state.placement = if (platform.fullScreen) WindowPlacement.Fullscreen else WindowPlacement.Maximized }
         Window(
             onCloseRequest = { graph.platform.sounds.stopAll(); exitApplication() },
             state = state,
@@ -91,12 +91,7 @@ fun main() {
                 runCatching { object {}.javaClass.getResourceAsStream("/icon.png")?.use { window.iconImage = javax.imageio.ImageIO.read(it) } }
             }
             window.minimumSize = java.awt.Dimension(380, 640)
-            // On a wide window the column stays phone-width and sits in the middle.
-            Box(Modifier.fillMaxSize().background(Color(0xFF101014)), contentAlignment = Alignment.TopCenter) {
-                Box(Modifier.widthIn(max = 620.dp).fillMaxHeight()) {
-                    key(platform.generation) { DCruxRoot(host) }
-                }
-            }
+            key(platform.generation) { DCruxRoot(host) }
         }
     }
 }

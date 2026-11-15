@@ -1,5 +1,7 @@
 package app.dcrux.ui.home
 
+import app.dcrux.ui.components.LocalWide
+import androidx.compose.foundation.layout.BoxWithConstraints
 import app.dcrux.Host
 import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
@@ -366,7 +368,8 @@ private fun ChannelCard(channel: Channel, settings: Settings, startExpanded: Boo
     var page by rememberSaveable(channel.id) { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     val shorts = if (settings.showShorts) 1 else 0
-    val size = settings.pageSize
+    // A wide screen shows the videos in columns, so a page holds several lines of them.
+    val size = settings.pageSize * if (LocalWide.current) 3 else 1
     val total by remember(channel.id, shorts) { g.db.videos().count(channel.id, shorts) }.collectAsState(initial = 0)
     val pageCount = (total + size - 1) / size
     LaunchedEffect(pageCount) { if (page >= pageCount && pageCount > 0) page = pageCount - 1 }
@@ -422,17 +425,23 @@ private fun ChannelCard(channel: Channel, settings: Settings, startExpanded: Boo
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    var lastDay = ""
-                    videos.forEach { v ->
-                        val day = Dates.dayKey(v.publishedAt)
-                        if (day != lastDay) {
-                            lastDay = day
-                            Text(
-                                Dates.prettyDay(day), Modifier.padding(start = 6.dp, top = 10.dp, bottom = 6.dp),
-                                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
-                            )
+                    // One video per line on a phone; side by side, as many as fit, on a wide screen.
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val columns = (maxWidth / 420.dp).toInt().coerceIn(1, 4)
+                        Column {
+                            videos.groupBy { Dates.dayKey(it.publishedAt) }.forEach { (day, sameDay) ->
+                                Text(
+                                    Dates.prettyDay(day), Modifier.padding(start = 6.dp, top = 10.dp, bottom = 6.dp),
+                                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                                )
+                                sameDay.chunked(columns).forEach { line ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        line.forEach { v -> Box(Modifier.weight(1f)) { VideoRow(v) { nav.push(Screen.VideoDetail(v.id)) } } }
+                                        repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }
+                                    }
+                                }
+                            }
                         }
-                        VideoRow(v) { nav.push(Screen.VideoDetail(v.id)) }
                     }
                     Spacer(Modifier.height(10.dp))
                     PaginationBar(page, pageCount, onPage = { page = it.coerceIn(0, (pageCount - 1).coerceAtLeast(0)) })

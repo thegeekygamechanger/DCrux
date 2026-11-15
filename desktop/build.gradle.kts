@@ -90,6 +90,8 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
     implementation("org.jsoup:jsoup:1.24.1")
+    // QR codes for pairing devices: drawn on one, read from a photo on the other. Apache-2.0, no network, no Play services.
+    implementation("com.google.zxing:core:3.5.4")
     implementation("org.apache.pdfbox:pdfbox:3.0.8")
 }
 
@@ -121,7 +123,7 @@ tasks.register<JavaExec>("render") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("app.dcrux.desktop.RenderKt")
     args = ((project.findProperty("shots") as String?) ?: "").split(' ').filter { it.isNotBlank() }
-    jvmArgs("-Djava.awt.headless=true")
+    jvmArgs("-Djava.awt.headless=true", "-Drender.size=" + ((project.findProperty("size") as String?) ?: "960x1840x2"))
 }
 
 // Two simulated devices pair and exchange data through the service this build points at (see SyncCheck.kt).

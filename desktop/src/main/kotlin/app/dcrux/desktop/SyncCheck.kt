@@ -87,6 +87,31 @@ fun main(args: Array<String>) {
         check("B's own data is still on B", b.db.asks().all().size == 2)
         check("a fresh address accepts data", a.claude.serviceCall("PUT", "/v1/sync/" + "0".repeat(64), """{"base":0,"data":"QUJD"}""")?.first == 200)
     }
+    // The pairing QR code: what one device draws, another must read back, also from a soft, tilted picture.
+    run {
+        val code = "P2FZQ-E9XRG-0E1WT-KTBWH-N6X3P"
+        val text = app.dcrux.sync.CloudSync.qrText(code)
+        val m = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 2))
+        val cell = 9
+        val clean = java.awt.image.BufferedImage(m.width * cell, m.height * cell, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        for (y in 0 until clean.height) for (x in 0 until clean.width) clean.setRGB(x, y, if (m[x / cell, y / cell]) 0x101010 else 0xF4F4F0)
+        // As a phone would see it on a monitor: smaller within a larger frame, a little rotated, a little blurred.
+        val photo = java.awt.image.BufferedImage(1600, 1200, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        photo.createGraphics().apply {
+            color = java.awt.Color(40, 44, 60); fillRect(0, 0, 1600, 1200)
+            setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            rotate(Math.toRadians(7.0), 800.0, 600.0); drawImage(clean, 520, 330, 520, 520, null); dispose()
+        }
+        val blur = java.awt.image.ConvolveOp(java.awt.image.Kernel(3, 3, FloatArray(9) { 1f / 9f })).filter(photo, null)
+        fun read(img: java.awt.image.BufferedImage): String? = runCatching {
+            val px = IntArray(img.width * img.height); img.getRGB(0, 0, img.width, img.height, px, 0, img.width)
+            val src = com.google.zxing.RGBLuminanceSource(img.width, img.height, px)
+            com.google.zxing.MultiFormatReader().decode(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(src)), mapOf(com.google.zxing.DecodeHintType.TRY_HARDER to true)).text
+        }.getOrNull()
+        check("a drawn QR code reads back to the same code", read(clean)?.let { app.dcrux.sync.CloudSync.fromQr(it) } == code.replace("-", ""))
+        check("it still reads from a tilted, blurred picture of a screen", read(blur)?.let { app.dcrux.sync.CloudSync.fromQr(it) } == code.replace("-", ""))
+        check("some other QR code is not taken for a sync code", app.dcrux.sync.CloudSync.fromQr("https://example.com") == null)
+    }
     println(if (failed == 0) "ALL PASSED" else "$failed FAILED")
     kotlin.system.exitProcess(if (failed == 0) 0 else 1)
 }

@@ -1,5 +1,8 @@
 package app.dcrux.ui.tests
 
+import androidx.compose.foundation.layout.widthIn
+import app.dcrux.ui.components.LocalWide
+import app.dcrux.ui.components.CruxList
 import app.dcrux.ui.OnBack
 import androidx.compose.ui.graphics.ImageBitmap
 import app.dcrux.LocalGraph
@@ -217,26 +220,26 @@ fun TestsTab(settings: Settings) {
     val hasKey = remember { g.secure.hasApiKey() || g.hasBuiltInKey }
     val draft by g.mains.draft.collectAsState()
     val evaluation by g.mains.progress.collectAsState()
-    val size = 5
+    val size = if (LocalWide.current) 12 else 5
 
     /** Starts a Mains attempt, asking first if one is already in progress. */
     fun startMains(begin: () -> Unit) {
         if (draft != null) replaceAsk = begin else begin()
     }
 
-    LazyColumn(
+    CruxList(
         Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + bottomBarInset()),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        spacing = 16.dp,
     ) {
-        item("head") {
+        item("head", full = true) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TabTitle("Tests", Modifier.weight(1f))
                 FilledTonalIconButton(onClick = { nav.searchOpen = true }) { Icon(Icons.Rounded.Search, "Search") }
             }
         }
 
-        item("mode") { ModeSwitch(mains) { mains = it; error = null } }
+        item("mode", full = true) { Box(Modifier.fillMaxWidth()) { Box(Modifier.widthIn(max = 560.dp)) { ModeSwitch(mains) { mains = it; error = null } } } }
 
         item("stats") {
             val stars = results.sumOf { it.second.stars }
@@ -390,7 +393,7 @@ fun TestsTab(settings: Settings) {
             }
         }
 
-        item("hh") {
+        item("hh", full = true) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("History", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
@@ -422,7 +425,7 @@ fun TestsTab(settings: Settings) {
             }
         }
         if (history.isEmpty()) {
-            item("none") {
+            item("none", full = true) {
                 EmptyState(
                     if (all.isEmpty()) "No tests yet" else "No $histFilter tests yet",
                     "Your results will be kept here, encrypted, until you reset the app.",
@@ -460,7 +463,7 @@ fun TestsTab(settings: Settings) {
                     }
                 }
             }
-            item("pg") { PaginationBar(page.coerceIn(0, pageCount - 1), pageCount, onPage = { page = it }) }
+            item("pg", full = true) { PaginationBar(page.coerceIn(0, pageCount - 1), pageCount, onPage = { page = it }) }
         }
     }
 

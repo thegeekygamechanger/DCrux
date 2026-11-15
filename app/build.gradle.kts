@@ -134,4 +134,6 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
     implementation("org.jsoup:jsoup:1.24.1")
+    // QR codes for pairing devices: drawn on one, read from a photo on the other. Apache-2.0, no network, no Play services.
+    implementation("com.google.zxing:core:3.5.4")
 }

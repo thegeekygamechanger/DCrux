@@ -1,5 +1,6 @@
 package app.dcrux.ui.components
 
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -44,4 +45,10 @@ fun TabTitle(text: String, modifier: Modifier = Modifier) {
  * clear of the floating bar. The bar has no band of its own; content passes behind it.
  */
 @Composable
-fun bottomBarInset(): Dp = 84.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+fun bottomBarInset(): Dp = if (LocalWide.current) 8.dp else 84.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+/**
+ * True when the app has a wide window to fill (a computer, landscape): navigation moves to a rail
+ * at the side, lists flow into columns and reading pages keep a comfortable width in the middle.
+ */
+val LocalWide = compositionLocalOf { false }

@@ -1,10 +1,9 @@
 name: Desktop installers
 
 # Builds DCrux for Windows (.msi) and Linux (.deb and .tar.gz) and attaches them to a release.
-# Runs by itself when a release is published; can also be started by hand for an existing tag.
+# Started by hand for an existing release tag (Actions → Desktop installers → Run workflow). It needs the
+# repository secrets DCRUX_PROXY_URL and DCRUX_APP_SECRET and stops at once without them.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -30,11 +29,11 @@ jobs:
       DCRUX_DESKTOP_ONLY: "1"
       DCRUX_PROXY_URL: ${{ secrets.DCRUX_PROXY_URL }}
       DCRUX_APP_SECRET: ${{ secrets.DCRUX_APP_SECRET }}
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-java@v4
         with:

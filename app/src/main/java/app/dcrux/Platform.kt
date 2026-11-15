@@ -70,6 +70,12 @@ interface Platform {
     /** Returns a function that opens the camera to photograph a page into a capture target, or null where there is no camera to open. */
     @Composable fun rememberCamera(onShot: () -> Unit): ((target: Any) -> Unit)?
 
+    /**
+     * Returns a function that opens the camera to read a QR code and hands back what it says (null when
+     * none was found), or null where there is no camera to open. Used to pair with another device.
+     */
+    @Composable fun rememberQrScanner(onResult: (String?) -> Unit): (() -> Unit)?
+
     /** Text on the clipboard, for the Paste button. */
     fun clipboardText(): String?
 

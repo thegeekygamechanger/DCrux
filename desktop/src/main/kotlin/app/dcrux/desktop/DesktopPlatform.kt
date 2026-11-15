@@ -96,6 +96,9 @@ class DesktopPlatform(override val filesDir: File) : Platform {
 
     @Composable override fun rememberCamera(onShot: () -> Unit): ((target: Any) -> Unit)? = null
 
+    // A computer shows the QR code; the phone is the one with a camera to read it.
+    @Composable override fun rememberQrScanner(onResult: (String?) -> Unit): (() -> Unit)? = null
+
     override fun clipboardText(): String? = runCatching {
         Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
     }.getOrNull()
