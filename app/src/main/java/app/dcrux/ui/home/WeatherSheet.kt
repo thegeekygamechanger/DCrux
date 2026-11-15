@@ -144,6 +144,17 @@ fun WeatherSheet(settings: Settings, onDismiss: () -> Unit) {
                         Stat("Air quality", if (w.aqi < 0) "Not available" else "${w.aqi} · ${WeatherRepo.aqiWord(w.aqi)}", Modifier.weight(1f))
                     }
 
+                    if (w.aqi >= 0) Text(
+                        if (w.aqiSource == "cpcb")
+                            "India's AQI from ${w.aqiStations} official ${if (w.aqiStations == 1) "monitor" else "monitors"} (CPCB)" +
+                                (if (w.aqiUpdated.isNotBlank()) ", reported ${w.aqiUpdated.substringAfter(' ').take(5)}" else "") + ". " +
+                                (if (w.aqiWorst >= 0 && w.aqiStations > 1) "Worst: ${w.aqiWorstStation}, ${w.aqiWorst}. " else "") +
+                                (if (w.aqiPeak >= 0) "Highest reading today: ${w.aqiPeak}." else "")
+                        else "India's AQI scale, estimated from modelled particle levels for this area (PM2.5 ${w.pm25.roundToInt()}, PM10 ${w.pm10.roundToInt()} µg/m³). " +
+                            "Official monitors can read higher or lower; check CPCB's Sameer app for the station nearest you.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
                     val alerts = remember(w) { WeatherRepo.advisories(w) }
                     Text(if (alerts.isEmpty()) "No alerts today" else "Today's alerts", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
                     val x = LocalExtra.current

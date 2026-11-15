@@ -239,6 +239,15 @@ data class Weather(
     val pm25: Double = -1.0,
     /** 1 between sunrise and sunset at the place, 0 at night, -1 when unknown. */
     val isDay: Int = -1,
+    val pm10: Double = -1.0,
+    /** Where [aqi] comes from: "cpcb" (official monitors) or "estimate" (worked out from modelled particle levels). */
+    val aqiSource: String = "",
+    /** With official monitors: how many, the worst one and its index, the day's peak, and when they last reported. */
+    val aqiStations: Int = 0,
+    val aqiWorstStation: String = "",
+    val aqiWorst: Int = -1,
+    val aqiPeak: Int = -1,
+    val aqiUpdated: String = "",
 )
 
 @Serializable

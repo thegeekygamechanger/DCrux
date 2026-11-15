@@ -40,7 +40,7 @@ data class Advisory(val title: String, val body: String, val severe: Boolean = f
  * Only a city-level position is ever used: coordinates are rounded to about a kilometre
  * before they are stored or sent anywhere.
  */
-class WeatherRepo(private val context: Context) {
+class WeatherRepo(private val context: Context, private val service: app.dcrux.ai.ClaudeClient? = null) {
     private val headers = mapOf("User-Agent" to Http.APP_UA)
 
     private fun round2(v: Double) = (v * 100).roundToInt() / 100.0
@@ -126,8 +126,16 @@ class WeatherRepo(private val context: Context) {
         val airJob = async {
             runCatching {
                 AppJson.parseToJsonElement(
-                    Http.getText("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${place.lat}&longitude=${place.lon}&current=us_aqi,pm2_5", headers)
+                    Http.getText("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${place.lat}&longitude=${place.lon}&current=pm2_5,pm10", headers)
                 ).jsonObject["current"] as? JsonObject
+            }.getOrNull()
+        }
+        // India's official monitors (CPCB), through the DCrux service, for cities that have them.
+        val officialJob = async {
+            if (!place.region.contains("India")) null
+            else runCatching {
+                service?.serviceGet("/v1/aqi?city=${URLEncoder.encode(place.name, "UTF-8")}&lat=${place.lat}&lon=${place.lon}")
+                    ?.let { AppJson.parseToJsonElement(it).jsonObject.takeIf { o -> o["aqi"] != null } }
             }.getOrNull()
         }
         val w = AppJson.parseToJsonElement(
@@ -143,7 +151,12 @@ class WeatherRepo(private val context: Context) {
         fun day(key: String) = daily?.get(key)?.jsonArray?.firstOrNull()?.jsonPrimitive?.doubleOrNull
         val temp = cur["temperature_2m"]?.jsonPrimitive?.doubleOrNull ?: throw IllegalStateException("No weather for this place")
         val air = airJob.await()
-        Weather(
+        val pm25 = air?.get("pm2_5")?.jsonPrimitive?.doubleOrNull ?: -1.0
+        val pm10 = air?.get("pm10")?.jsonPrimitive?.doubleOrNull ?: -1.0
+        // India's own index, from the particle levels right now. An estimate: the levels come from a forecast model, not a monitor.
+        val estimate = indiaAqi(pm25, pm10)
+        val official = officialJob.await()
+        val modelled = Weather(
             at = System.currentTimeMillis(),
             temp = temp,
             feels = cur["apparent_temperature"]?.jsonPrimitive?.doubleOrNull ?: temp,
@@ -153,9 +166,19 @@ class WeatherRepo(private val context: Context) {
             rain = day("precipitation_sum") ?: 0.0,
             uv = day("uv_index_max") ?: 0.0,
             dayCode = day("weather_code")?.toInt() ?: 0,
-            aqi = air?.get("us_aqi")?.jsonPrimitive?.intOrNull ?: -1,
-            pm25 = air?.get("pm2_5")?.jsonPrimitive?.doubleOrNull ?: -1.0,
+            aqi = estimate, aqiSource = if (estimate >= 0) "estimate" else "",
+            pm25 = pm25, pm10 = pm10,
             isDay = cur["is_day"]?.jsonPrimitive?.intOrNull ?: -1,
+        )
+        // Official monitors, when the city has them, replace the estimate.
+        val o = official
+        if (o == null) modelled else modelled.copy(
+            aqi = o["aqi"]?.jsonPrimitive?.intOrNull ?: modelled.aqi, aqiSource = "cpcb",
+            aqiStations = o["stations"]?.jsonPrimitive?.intOrNull ?: 0,
+            aqiWorstStation = (o["worst"] as? JsonObject)?.get("station")?.jsonPrimitive?.content.orEmpty(),
+            aqiWorst = (o["worst"] as? JsonObject)?.get("aqi")?.jsonPrimitive?.intOrNull ?: -1,
+            aqiPeak = o["peak"]?.jsonPrimitive?.intOrNull ?: -1,
+            aqiUpdated = o["updated"]?.jsonPrimitive?.content.orEmpty(),
         )
     }
 
@@ -179,15 +202,36 @@ class WeatherRepo(private val context: Context) {
             else -> "Weather"
         }
 
+/** India's National Air Quality Index bands (CPCB). */
         fun aqiWord(aqi: Int): String = when {
             aqi < 0 -> ""
             aqi <= 50 -> "Good"
-            aqi <= 100 -> "Moderate"
-            aqi <= 150 -> "Unhealthy for sensitive people"
-            aqi <= 200 -> "Unhealthy"
-            aqi <= 300 -> "Very unhealthy"
-            else -> "Hazardous"
+            aqi <= 100 -> "Satisfactory"
+            aqi <= 200 -> "Moderate"
+            aqi <= 300 -> "Poor"
+            aqi <= 400 -> "Very poor"
+            else -> "Severe"
         }
+
+        private fun subIndex(c: Double, bands: List<Pair<Double, Int>>): Int {
+            if (c < 0) return -1
+            var loC = 0.0
+            var loI = 0
+            for ((hiC, hiI) in bands) {
+                if (c <= hiC) return (loI + (c - loC) * (hiI - loI) / (hiC - loC)).roundToInt()
+                loC = hiC; loI = hiI
+            }
+            return 500
+        }
+
+        /**
+         * India's index from particle concentrations (µg/m³), using CPCB's breakpoints: the index is the
+         * worse of the PM2.5 and PM10 sub-indices, which decide it on all but rare days.
+         */
+        fun indiaAqi(pm25: Double, pm10: Double): Int = maxOf(
+            subIndex(pm25, listOf(30.0 to 50, 60.0 to 100, 90.0 to 200, 120.0 to 300, 250.0 to 400, 380.0 to 500)),
+            subIndex(pm10, listOf(50.0 to 50, 100.0 to 100, 250.0 to 200, 350.0 to 300, 430.0 to 400, 510.0 to 500)),
+        )
 
         /**
          * Advisories derived from the forecast numbers with fixed thresholds (rain bands follow the
@@ -211,9 +255,9 @@ class WeatherRepo(private val context: Context) {
             }
             if (w.code in listOf(45, 48) || w.dayCode in listOf(45, 48)) add(Advisory("Fog", "Visibility may be poor. Trains and buses can run late; leave with time in hand."))
             when {
-                w.aqi > 300 -> add(Advisory("Hazardous air", "Air quality index ${w.aqi}. Stay indoors as far as possible and wear an N95 mask outside.", severe = true))
-                w.aqi > 200 -> add(Advisory("Very unhealthy air", "Air quality index ${w.aqi}. Avoid outdoor exercise and wear a mask outside.", severe = true))
-                w.aqi > 150 -> add(Advisory("Unhealthy air", "Air quality index ${w.aqi}. Cut down time outdoors, more so with asthma or a cough."))
+                w.aqi > 400 -> add(Advisory("Severe air pollution", "Air quality index ${w.aqi}. Stay indoors as far as possible, keep windows shut and wear an N95 mask outside.", severe = true))
+                w.aqi > 300 -> add(Advisory("Very poor air", "Air quality index ${w.aqi}. Avoid outdoor exercise and wear an N95 mask outside.", severe = true))
+                w.aqi > 200 -> add(Advisory("Poor air", "Air quality index ${w.aqi}. Cut down time outdoors, more so with asthma or a cough."))
             }
             if (w.uv >= 11) add(Advisory("Extreme UV", "UV index ${w.uv.roundToInt()}. Cover up and avoid the midday sun."))
             else if (w.uv >= 8 && w.max >= 30) add(Advisory("Strong sun", "UV index ${w.uv.roundToInt()}. Cover your head between 11 am and 3 pm."))

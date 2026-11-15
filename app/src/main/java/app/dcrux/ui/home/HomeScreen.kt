@@ -173,7 +173,8 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
     var weatherTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(settings.place, weatherTick) {
         val place = settings.place ?: return@LaunchedEffect
-        val fresh = settings.weather?.let { System.currentTimeMillis() - it.at < 30 * 60_000L } == true
+        // A reading saved by an older version (US index, no source noted) is replaced straight away.
+        val fresh = settings.weather?.let { System.currentTimeMillis() - it.at < 30 * 60_000L && (it.aqi < 0 || it.aqiSource.isNotBlank()) } == true
         if (fresh && weatherTick == 0) return@LaunchedEffect
         // Runs in the app's scope so that leaving the screen mid-way does not lose the answer; one retry for a slow start.
         g.scope.launch {

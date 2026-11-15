@@ -33,7 +33,7 @@ class Graph(val app: Application) {
     val ai: AiRepo by lazy { AiRepo(this) }
     val sync: SyncManager by lazy { SyncManager(this) }
     val updates: UpdateManager by lazy { UpdateManager(this) }
-    val weather: WeatherRepo by lazy { WeatherRepo(app) }
+    val weather: WeatherRepo by lazy { WeatherRepo(app, claude) }
     val mains: MainsStore by lazy { MainsStore(this) }
 
     /** True when this build is set up to use the DCrux service instead of a key on the phone. */

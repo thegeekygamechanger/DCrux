@@ -36,6 +36,10 @@ const cfg = {
   // Requests one install may have running at the same moment.
   concurrent: Number(env.DCRUX_DEVICE_CONCURRENT || 8),
   stateFile: env.DCRUX_STATE_FILE || '',
+  // India's official air-quality monitors (CPCB), published on data.gov.in. Needs your own free key from
+  // data.gov.in (the site's public sample key is rationed to a few dozen requests and cannot carry an app).
+  // Without it the relay answers "not set up" and the app shows its own estimate instead.
+  dataGovKey: env.DATAGOV_API_KEY || '',
   upstream: env.DCRUX_UPSTREAM || 'https://api.anthropic.com',
 };
 if (!cfg.apiKey || !cfg.appSecret) {
@@ -137,6 +141,91 @@ function upstreamRequest(method, path, headers, body, onResponse, onError) {
 
 let modelsCache = { at: 0, body: null };
 
+// ---- air quality from CPCB monitors -------------------------------------------------------
+const AQI_RESOURCE = 'https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69';
+const aqiCache = new Map();   // city (lower case) -> { at, data, pending }
+
+function getJson(url, ms = 25_000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { accept: 'application/json', 'user-agent': 'DCrux relay (https://github.com/thegeekygamechanger/DCrux)' } }, r => {
+      const chunks = []; r.on('data', c => chunks.push(c));
+      r.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { reject(e); } });
+    });
+    req.on('error', reject);
+    req.setTimeout(ms, () => req.destroy(new Error('timeout')));
+  });
+}
+
+/** Every record the monitors of one city reported in the latest hour. The source is slow and sometimes fails, so it is tried twice. */
+async function cityRecords(city) {
+  const url = `${AQI_RESOURCE}?api-key=${cfg.dataGovKey}&format=json&limit=2000&filters%5Bcity%5D=${encodeURIComponent(city)}`;
+  let d;
+  try { d = await getJson(url); } catch { d = await getJson(url); }
+  // A refusal (rate limit, bad key) comes back as JSON too; it must not be mistaken for "this city has no monitors".
+  if (!Array.isArray(d.records)) throw new Error(String(d.error || d.message || 'no records field').slice(0, 80));
+  return d.records;
+}
+
+const km = (a, b, c, d) => { const R = 6371, x = (c - a) * Math.PI / 180, y = (d - b) * Math.PI / 180, h = Math.sin(x / 2) ** 2 + Math.cos(a * Math.PI / 180) * Math.cos(c * Math.PI / 180) * Math.sin(y / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+
+/**
+ * The city's index the way CPCB reports it: each station's index is its worst pollutant's
+ * sub-index, and the city's is the average of its stations. Also the worst station, since
+ * one number hides how bad the worst neighbourhood is.
+ */
+function summarise(records, lat, lon) {
+  const stations = new Map();
+  for (const r of records) {
+    const v = Number(r.avg_value), peak = Number(r.max_value);
+    if (!r.station || !Number.isFinite(v)) continue;
+    const s = stations.get(r.station) || { name: String(r.station).replace(/\s*-\s*[A-Z]{3,6}$/, '').trim(), lat: Number(r.latitude), lon: Number(r.longitude), aqi: -1, dominant: '', peak: -1, hasPm: false, updated: r.last_update };
+    if (v > s.aqi) { s.aqi = v; s.dominant = r.pollutant_id; }
+    if (Number.isFinite(peak) && peak > s.peak) s.peak = peak;
+    if (r.pollutant_id === 'PM2.5' || r.pollutant_id === 'PM10') s.hasPm = true;
+    stations.set(r.station, s);
+  }
+  let list = [...stations.values()].filter(s => s.hasPm && s.aqi >= 0);
+  if (!list.length) return null;
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    for (const s of list) s.km = Number.isFinite(s.lat) && Number.isFinite(s.lon) ? km(lat, lon, s.lat, s.lon) : 0;
+    // A city name can be shared by places far apart; keep only monitors within reach of the user's city.
+    const near = list.filter(s => s.km <= 60);
+    if (!near.length) return null;
+    list = near;
+  }
+  const worst = list.reduce((a, b) => (b.aqi > a.aqi ? b : a));
+  const tally = {}; for (const s of list) tally[s.dominant] = (tally[s.dominant] || 0) + 1;
+  return {
+    aqi: Math.round(list.reduce((n, s) => n + s.aqi, 0) / list.length),
+    stations: list.length,
+    worst: { station: worst.name, aqi: Math.round(worst.aqi) },
+    peak: Math.round(Math.max(...list.map(s => s.peak))),
+    dominant: Object.entries(tally).sort((a, b) => b[1] - a[1])[0][0],
+    updated: list[0].updated || '',
+    source: 'CPCB',
+  };
+}
+
+/** Cached for an hour (the monitors report hourly). If a refresh fails, the last good reading is served for up to six hours. */
+async function cityAqi(city, lat, lon) {
+  const k = city.toLowerCase();
+  const hit = aqiCache.get(k);
+  if (hit && hit.records && Date.now() - hit.at < 3_600_000) return summarise(hit.records, lat, lon);
+  if (hit && hit.pending) { try { await hit.pending; } catch { /* fall through to stale */ } const h = aqiCache.get(k); return h && h.records ? summarise(h.records, lat, lon) : null; }
+  const pending = cityRecords(city);
+  aqiCache.set(k, { ...(hit || {}), pending });
+  try {
+    const records = await pending;
+    aqiCache.set(k, { at: Date.now(), records });
+    if (aqiCache.size > 400) aqiCache.delete(aqiCache.keys().next().value);
+    return summarise(records, lat, lon);
+  } catch (e) {
+    aqiCache.set(k, hit ? { at: hit.at, records: hit.records } : { at: 0, records: null });
+    if (hit && hit.records && Date.now() - hit.at < 6 * 3_600_000) return summarise(hit.records, lat, lon);
+    throw e;
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
   const url = new URL(req.url, 'http://x');
@@ -167,6 +256,21 @@ const server = http.createServer(async (req, res) => {
         });
       }, () => { send(res, 502, 'api_error', 'The AI service is not available right now.'); log(502, 'upstream error'); });
       return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/aqi') {
+      if (!checkCaller(req, Buffer.alloc(0))) { send(res, 401, 'authentication_error', 'Unrecognised client.'); return log(401); }
+      const city = String(url.searchParams.get('city') || '').trim().slice(0, 60);
+      const lat = Number(url.searchParams.get('lat')), lon = Number(url.searchParams.get('lon'));
+      if (!/^[\p{L} .'()-]{2,60}$/u.test(city)) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'aqi city'); }
+      if (!cfg.dataGovKey) { send(res, 503, 'api_error', 'Official air-quality data is not set up on this service.'); return log(503, 'aqi no key'); }
+      try {
+        const data = await cityAqi(city, lat, lon);
+        if (!data) { send(res, 404, 'not_found_error', 'No official monitor is listed for this city.'); return log(404, 'aqi none'); }
+        const body = JSON.stringify(data);
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(body);
+        return log(200, `aqi ${data.stations} stations`);
+      } catch (e) { send(res, 502, 'api_error', 'The air-quality data is not available right now.'); return log(502, 'aqi ' + (e?.message || '')); }
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/messages') {

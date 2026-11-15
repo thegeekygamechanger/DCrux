@@ -101,6 +101,14 @@ class ClaudeClient {
         Unit
     }
 
+    /** A signed GET to the DCrux service for something other than the AI (air quality). Null when there is no service or it has no answer. */
+    suspend fun serviceGet(path: String): String? = withContext(Dispatchers.IO) {
+        if (service == null) return@withContext null
+        runCatching {
+            Http.client.newCall(base(path, VIA_SERVICE, null).get().build()).execute().use { r -> if (r.isSuccessful) r.body.string() else null }
+        }.getOrNull()
+    }
+
     /** Lists the models this key can use, with the capabilities DCrux adapts to. Doubles as the key test. */
     suspend fun listModels(apiKey: String): List<ModelInfo> = withContext(Dispatchers.IO) {
         val out = mutableListOf<ModelInfo>()

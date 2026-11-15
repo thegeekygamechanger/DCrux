@@ -8,7 +8,7 @@ and the relay adds the key and forwards them.
 
 ## What it allows
 
-- `GET /v1/models` and `POST /v1/messages` only, streamed back as they arrive.
+- `GET /v1/models` and `POST /v1/messages`, streamed back as they arrive, and `GET /v1/aqi` (official air quality for a city, when a data.gov.in key is set).
 - Only the models in `DCRUX_MODELS`, a cap on `max_tokens` and request size, and no tools except
   the API's own web search (a few searches per answer, for Ask AI when the material lacks the answer).
 - Only text and inline pictures (the photographed pages of a Mains answer) as content; nothing
@@ -46,6 +46,7 @@ a hash of the install id, the model and the request size.
 | `DCRUX_MAX_IMAGES` | `8` | Pictures allowed in one request |
 | `DCRUX_MAX_SEARCHES` | `3` | Web searches one answer may make (billed per search by the API) |
 | `DCRUX_STATE_FILE` | none | Where to keep the day's counters across restarts |
+| `DATAGOV_API_KEY` | none | Your free key from data.gov.in. With it, `GET /v1/aqi?city=&lat=&lon=` answers with India's official AQI for the city from the CPCB monitors (cached for an hour). Without it the app shows its own estimate. |
 
 Days are counted in India time.
 
