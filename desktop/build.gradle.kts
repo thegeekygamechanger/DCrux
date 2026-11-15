@@ -70,7 +70,9 @@ kotlin {
     sourceSets["main"].kotlin.exclude(androidOnly)
 }
 // The fonts are the Android app's own files.
-sourceSets["main"].resources.srcDir("../app/src/main/res").apply { include("font/**") }
+sourceSets["main"].resources.srcDir("../app/src/main/res")
+sourceSets["main"].resources.srcDir("icons")
+sourceSets["main"].resources.include("font/**", "icon.png")
 
 ksp { arg("room.generateKotlin", "true") }
 
@@ -102,8 +104,13 @@ compose.desktop {
             vendor = "Harsh Kumar"
             licenseFile.set(rootProject.file("LICENSE"))
             modules("java.sql", "java.desktop", "java.naming", "jdk.unsupported", "java.net.http", "jdk.crypto.ec")
-            linux { shortcut = true; menuGroup = "Education" }
-            windows { shortcut = true; menu = true; menuGroup = "DCrux"; upgradeUuid = "6f0d6c0e-7a2b-4a53-9d55-2b5f6f0a1c41"; perUserInstall = true }
+            linux { shortcut = true; menuGroup = "Education"; iconFile.set(project.file("icons/icon.png")) }
+            windows {
+                shortcut = true; menu = true; menuGroup = "DCrux"; perUserInstall = true
+                // Stays the same for every version, so a newer installer replaces the older app instead of sitting beside it.
+                upgradeUuid = "6f0d6c0e-7a2b-4a53-9d55-2b5f6f0a1c41"
+                iconFile.set(project.file("icons/icon.ico"))
+            }
         }
     }
 }
@@ -133,5 +140,13 @@ tasks.register<JavaExec>("cloud") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("app.dcrux.desktop.CloudCliKt")
     args = ((project.findProperty("cli") as String?) ?: "").split(' ').filter { it.isNotBlank() }
+    jvmArgs("-Djava.awt.headless=true")
+}
+
+// Draws the app's logo to desktop/icons/icon.png (see IconMaker.kt); the .ico for Windows is made from it.
+tasks.register<JavaExec>("makeIcon") {
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("app.dcrux.desktop.IconMakerKt")
+    args = listOf(file("icons/icon.png").path, "512")
     jvmArgs("-Djava.awt.headless=true")
 }

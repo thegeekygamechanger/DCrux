@@ -13,5 +13,6 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "DCrux"
-include(":app")
+// DCRUX_DESKTOP_ONLY=1 builds the Linux and Windows app on a machine without the Android SDK.
+if (System.getenv("DCRUX_DESKTOP_ONLY") == null) include(":app")
 include(":desktop")

@@ -86,7 +86,10 @@ fun main() {
             title = "DCrux",
             onPreviewKeyEvent = { e -> e.type == KeyEventType.KeyDown && e.key == Key.Escape && BackStack.back() },
         ) {
-            LaunchedEffect(Unit) { platform.frame = window }
+            LaunchedEffect(Unit) {
+                platform.frame = window
+                runCatching { object {}.javaClass.getResourceAsStream("/icon.png")?.use { window.iconImage = javax.imageio.ImageIO.read(it) } }
+            }
             window.minimumSize = java.awt.Dimension(380, 640)
             // On a wide window the column stays phone-width and sits in the middle.
             Box(Modifier.fillMaxSize().background(Color(0xFF101014)), contentAlignment = Alignment.TopCenter) {

@@ -20,6 +20,15 @@ phone. Android 7.0 or newer. No API key is needed.
 After that the app updates itself: it checks this repository's latest release once a day
 (or on request in **Settings → App update**) and hands the new build to Android to install.
 
+### On a computer (Windows and Linux)
+
+The same release carries `DCrux-<version>-windows-x64.msi`, `DCrux-<version>-linux-x64.deb` and
+`DCrux-<version>-linux-x64.tar.gz` (unpack, run `DCrux/bin/DCrux`). It is the same app, built from the
+same source files. Turn on **Settings → Sync across devices** on both and enter the code shown on one
+into the other: channels, video notes, questions, tests and study settings then follow you, encrypted
+on the device before they are uploaded. Video notes are written on the phone (the computer build has
+no embedded player to read captions from) and arrive through sync.
+
 ## What it does
 
 | Area | What you get |
@@ -116,17 +125,33 @@ app/src/main/java/app/dcrux/
   net/       YouTube and news sources, Wikimedia Commons photos, weather, HTTP
   ai/        Claude Messages API client (streaming), prompts, background keep-alive
   mains/     A Mains attempt in progress: timers, page photos, evaluation
-  sync/      Daily WorkManager sync and manual refresh
+  sync/      Daily sync and manual refresh; CloudSync (encrypted sync across a person's devices)
+  Platform.kt   The one interface through which the screens reach the device (Android or computer)
   update/    In-app updates from GitHub releases
   audio/     Procedural sound engine and playback service
   pdf/       In-memory PDF layout and streaming share provider
   lock/      Biometric and PIN app lock
   ui/        Compose screens and theme
+desktop/         The Windows and Linux app: the same sources as app/, plus the computer's side of Platform
 server/          The optional relay that holds the API key for public builds
 scripts/         release.sh
 release-notes/   One file per version, shown on GitHub and inside the app
 licenses/        Font licences
 ```
+
+### The desktop app
+
+```bash
+./gradlew :desktop:run                    # run it
+./gradlew :desktop:createDistributable    # the app with its own Java runtime, in desktop/build/compose/binaries
+./gradlew :desktop:packageDeb             # or packageMsi on Windows
+./gradlew :desktop:render -Pshots="<data dir> <out dir> nosync wait:2500 first"   # draw it off-screen to a PNG
+```
+
+It compiles the files under `app/src/main/java` (minus the Android-only ones listed in
+`desktop/build.gradle.kts`) together with its own `Desktop*.kt` counterparts. `DCRUX_DESKTOP_ONLY=1`
+leaves the Android app out, so no Android SDK is needed; the GitHub workflow in
+`.github/workflows/desktop.yml` builds the installers that way and attaches them to each release.
 
 ## Licence
 

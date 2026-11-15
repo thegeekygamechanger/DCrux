@@ -1,0 +1,89 @@
+name: Desktop installers
+
+# Builds DCrux for Windows (.msi) and Linux (.deb and .tar.gz) and attaches them to a release.
+# Runs by itself when a release is published; can also be started by hand for an existing tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the installers to (for example v1.4.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            task: packageDeb
+          - os: windows-latest
+            task: packageMsi
+    runs-on: ${{ matrix.os }}
+    env:
+      # Leaves the Android app out of the build, so no Android SDK is needed here.
+      DCRUX_DESKTOP_ONLY: "1"
+      DCRUX_PROXY_URL: ${{ secrets.DCRUX_PROXY_URL }}
+      DCRUX_APP_SECRET: ${{ secrets.DCRUX_APP_SECRET }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Build the app with its own Java runtime
+        shell: bash
+        run: ./gradlew :desktop:createDistributable --no-daemon
+
+      # The packaged app is run without a window: it must open its database and settings and draw its
+      # first screen with the runtime it ships with. The picture is kept with the run.
+      - name: Check that the packaged app starts
+        shell: bash
+        run: |
+          APP=desktop/build/compose/binaries/main/app
+          cp -r "$APP/DCrux" smoke
+          CFG=$(find smoke -name DCrux.cfg | head -1)
+          sed -i 's/app.mainclass=app.dcrux.desktop.MainKt/app.mainclass=app.dcrux.desktop.RenderKt/' "$CFG"
+          sed -i 's/\[JavaOptions\]/[JavaOptions]\njava-options=-Djava.awt.headless=true/' "$CFG"
+          EXE=$(find smoke -maxdepth 2 \( -name DCrux.exe -o -path '*/bin/DCrux' \) | head -1)
+          mkdir -p smoke-data smoke-out
+          "$EXE" "$PWD/smoke-data" "$PWD/smoke-out" nosync wait:2500 first || true
+          sleep 5
+          ls -la smoke-out smoke-data
+          test -s smoke-out/first.png
+          test -s smoke-data/dcrux.db
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: first-screen-${{ runner.os }}
+          path: smoke-out/first.png
+
+      - name: Make the installer
+        shell: bash
+        run: ./gradlew :desktop:${{ matrix.task }} --no-daemon
+
+      - name: Collect the files
+        shell: bash
+        run: |
+          V="${TAG#v}"
+          mkdir out
+          find desktop/build/compose/binaries -name '*.deb' -exec cp {} "out/DCrux-$V-linux-x64.deb" \;
+          find desktop/build/compose/binaries -name '*.msi' -exec cp {} "out/DCrux-$V-windows-x64.msi" \;
+          if [ "$RUNNER_OS" = "Linux" ]; then tar -C desktop/build/compose/binaries/main/app -czf "out/DCrux-$V-linux-x64.tar.gz" DCrux; fi
+          ls -la out
+
+      - name: Attach them to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" out/* --clobber
