@@ -178,10 +178,10 @@ fun WeatherSheet(settings: Settings, onDismiss: () -> Unit) {
 
             if (choosing && busy == null) {
                 Text(
-                    "DCrux shows the temperature and any weather alerts for your city. Only the city's position, rounded to about a kilometre, is used; it stays on this phone and is sent only to the weather service.",
+                    "DCrux shows the temperature and any weather alerts for your city. Only the city's position, rounded to about a kilometre, is used; it stays on this device and is sent only to the weather service.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                FilledTonalButton(
+                if (!g.platform.isDesktop) FilledTonalButton(
                     onClick = { if (g.weather.hasLocationPermission()) useLocation() else askLocation() },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
@@ -197,7 +197,7 @@ fun WeatherSheet(settings: Settings, onDismiss: () -> Unit) {
                 }
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), shape = CircleShape, singleLine = true,
-                    placeholder = { Text("Or type your city") },
+                    placeholder = { Text(if (g.platform.isDesktop) "Type your city" else "Or type your city") },
                     trailingIcon = { IconButton(onClick = { search() }, enabled = query.trim().length >= 2) { Icon(Icons.Rounded.Search, "Find city") } },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { if (query.trim().length >= 2) search() }),

@@ -148,7 +148,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
     // Nothing is written without a yes: opening a video (or flipping the toggle) asks first.
     LaunchedEffect(v?.id, detailed) {
         if (v == null || !hasKey || job != null || grabbing) return@LaunchedEffect
-        if (text == null && started.add(detailed)) confirmFor = detailed
+        if (text == null && !g.platform.isDesktop && started.add(detailed)) confirmFor = detailed
     }
     confirmFor?.let { mode ->
         AlertDialog(
@@ -254,7 +254,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                                         "Written by Crux AI. Check important facts against the video.",
                                         Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    TextButton(onClick = { generate(detailed) }) {
+                                    if (!g.platform.isDesktop) TextButton(onClick = { generate(detailed) }) {
                                         Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Redo")
                                     }
                                 }
@@ -293,11 +293,14 @@ fun VideoScreen(videoId: String, settings: Settings) {
                             "nokey" -> {
                                 Text("Add an AI key", style = MaterialTheme.typography.titleMedium)
                                 Spacer(Modifier.height(4.dp))
-                                Text("Summaries are written by Crux AI with your own key, stored only on this phone.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Summaries are written by Crux AI with your own key, stored only on this device.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(12.dp))
                                 FilledTonalButton(onClick = { nav.openSettings() }) { Text("Open Settings") }
                             }
-                            else -> Button(onClick = { generate(detailed) }) {
+                            else -> if (g.platform.isDesktop) Text(
+                                "Notes for a video are written on your phone, where DCrux can listen to it. Turn on sync in Settings on both and they appear here.",
+                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ) else Button(onClick = { generate(detailed) }) {
                                 Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
                                 Text(if (detailed) "Write detailed notes" else "Write the crux")
                             }

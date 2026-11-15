@@ -379,7 +379,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                             }
                         }
                         Text(
-                            "Encrypted with a key held in this phone's secure hardware. It is never shown in full, never backed up and never leaves the device except to call the AI service.",
+                            "Encrypted with a key held in this device's secure hardware. It is never shown in full, never backed up and never leaves the device except to call the AI service.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (!g.hasBuiltInKey && !hasKey) {
@@ -403,7 +403,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                                     onClick = {
                                         g.secure.saveApiKey(keyInput)
                                         keyInput = ""; hasKey = true; tested = false
-                                        testMessage = true to "Key saved on this phone."
+                                        testMessage = true to "Key saved on this device."
                                     },
                                 ) { Text("Save API key") }
                             }
@@ -504,7 +504,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                     }
                     SwitchRow(
                         "Unlock with biometrics",
-                        if (g.platform.canUseBiometrics) "Fingerprint or face" else "No fingerprint or face is set up on this phone",
+                        if (g.platform.canUseBiometrics) "Fingerprint or face" else "No fingerprint or face is set up on this device",
                         settings.biometric && settings.lockEnabled, enabled = settings.lockEnabled && g.platform.canUseBiometrics,
                     ) { scope.launch { g.prefs.setBiometric(it) } }
                     if (settings.lockEnabled) {
@@ -526,10 +526,10 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("data") {
-                Section("Data", Icons.Rounded.Storage, "Kept on this phone until you reset", openSection == "data", { openSection = if (openSection == "data") "" else "data" }) {
+                Section("Data", Icons.Rounded.Storage, "Kept on this device until you reset", openSection == "data", { openSection = if (openSection == "data") "" else "data" }) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            "Everything stays on this phone and is kept until you reset: channels, history, summaries, headlines and encrypted test results. Nothing is backed up to the cloud.",
+                            "Everything stays on this device and is kept until you reset: channels, history, summaries, headlines and encrypted test results. Nothing is backed up to the cloud.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Button(
@@ -591,7 +591,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
     if (resetAsk) AlertDialog(
         onDismissRequest = { resetAsk = false },
         title = { Text("Reset DCrux?") },
-        text = { Text("This deletes every channel, summary, headline, test result and setting on this phone" + if (g.hasBuiltInKey) "." else ", and the saved API key.") },
+        text = { Text("This deletes every channel, summary, headline, test result and setting on this device" + if (g.hasBuiltInKey) "." else ", and the saved API key.") },
         confirmButton = {
             Button(
                 onClick = { resetAsk = false; resetApp() },

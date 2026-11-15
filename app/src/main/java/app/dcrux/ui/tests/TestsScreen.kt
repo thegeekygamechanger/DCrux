@@ -254,7 +254,7 @@ fun TestsTab(settings: Settings) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Lock, null, Modifier.size(14.dp), tint = Color.White)
                             Spacer(Modifier.width(4.dp))
-                            Text("Encrypted on this phone", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                            Text("Encrypted on this device", color = Color.White, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -468,7 +468,7 @@ fun TestsTab(settings: Settings) {
         AlertDialog(
             onDismissRequest = { deleteAsk = null },
             title = { Text("Delete this result?") },
-            text = { Text("${r.title}, ${r.scoreText}. It will be removed from this phone and cannot be brought back.") },
+            text = { Text("${r.title}, ${r.scoreText}. It will be removed from this device and cannot be brought back.") },
             confirmButton = { TextButton(onClick = { deleteAsk = null; scope.launch { g.db.tests().delete(id) } }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleteAsk = null }) { Text("Keep") } },
         )
@@ -618,7 +618,7 @@ fun TestReviewScreen(screen: Screen.TestReview) {
     var page by rememberSaveable { mutableIntStateOf(0) }
     val r = screen.shown ?: stored
     // The PDF is made from the stored result, so it is offered only when that is what is on screen.
-    val canPdf = screen.shown == null
+    val canPdf = screen.shown == null && !g.platform.isDesktop
     val celebrate = fresh && r != null && r.stars >= 4
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().appBackground().statusBarsPadding()) {

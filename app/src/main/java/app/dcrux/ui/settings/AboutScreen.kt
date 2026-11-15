@@ -83,7 +83,7 @@ private val notices = listOf(
 private enum class Info(val title: String, val line: String, val icon: ImageVector) {
     APP("About the app", "Who made it, version, source code", Icons.Rounded.Info),
     AI("How Crux AI works", "What it reads, how it scores, where it can be wrong", Icons.Rounded.AutoAwesome),
-    PRIVACY("Privacy", "What stays on the phone and what leaves it", Icons.Rounded.Shield),
+    PRIVACY("Privacy", "What stays on the device and what leaves it", Icons.Rounded.Shield),
     TERMS("Terms of use", "The rules for using DCrux", Icons.Rounded.Gavel),
     LICENCES("Licences and credits", "Everything DCrux is built with, and whose it is", Icons.Rounded.Code),
 }
@@ -163,10 +163,10 @@ fun AboutScreen() {
         }
         Info.PRIVACY -> CruxSheet("Privacy", { sheet = null }, Icons.Rounded.Shield) {
             SheetPara("No account, no tracking", "DCrux has no sign-in, no ads and no analytics. Nobody receives a record of what you read or how you score.")
-            SheetPara("What stays on the phone", "Your channels, video notes, headlines, questions you asked, test results and settings are stored only on this phone. Test results and the app-lock PIN are encrypted with a key held in the phone's secure hardware. Android backups are switched off, so none of it is copied to the cloud. It stays until you choose Reset in Settings or uninstall the app.")
+            SheetPara("What stays on the phone", "Your channels, video notes, headlines, questions you asked, test results and settings are stored only on this device. Test results and the app-lock PIN are encrypted with a key held in the phone's secure hardware. Android backups are switched off, so none of it is copied to the cloud. It stays until you choose Reset in Settings or uninstall the app.")
             SheetPara("What goes to Crux AI", "To write notes, scores, tests, answers and evaluations, the text involved (captions, headlines, your question) is sent to Anthropic's Claude API; in the published app it travels through the DCrux relay. For a Mains evaluation, the photos of your answer pages are sent the same way. The relay does not store or log what is sent or what comes back. It records the time and size of each request against a scrambled install number, and counts the day's requests per install and per network address, to stop abuse. When Ask Crux AI searches the web, the search is run by the AI service, not from your phone. Anthropic handles the content under its own terms.")
             SheetPara("Photos of your answers", "Page photos are kept in the app's private storage only until the evaluation finishes, then deleted. What remains is Crux AI's reading of the pages and its feedback, stored encrypted with your result. DCrux does not ask for camera permission: your phone's own camera app takes the picture.")
-            SheetPara("Location", "Optional. If you allow it, or type your city, only a city-level position (rounded to about a kilometre) is kept on the phone and sent to Open-Meteo to fetch the weather. On phones without a built-in place lookup it is also sent to BigDataCloud to get the city's name. For Indian cities, the city's name and that rounded position also go to the DCrux service, which looks up the official air-quality monitors. Remove it any time from the weather sheet.")
+            SheetPara("Location", "Optional. If you allow it, or type your city, only a city-level position (rounded to about a kilometre) is kept on the device and sent to Open-Meteo to fetch the weather. On phones without a built-in place lookup it is also sent to BigDataCloud to get the city's name. For Indian cities, the city's name and that rounded position also go to the DCrux service, which looks up the official air-quality monitors. Remove it any time from the weather sheet.")
             SheetPara("Other services the app talks to", "YouTube (channel pages and the embedded player), the news publishers you pick (their feeds and sites, opened in the in-app browser), Wikimedia Commons (photos) and GitHub (app updates). Each sees your network address, as any website does, and applies its own privacy policy.")
             SheetPara("Deleting everything", "Settings → Data → Reset the app erases all of the above from the phone.")
         }

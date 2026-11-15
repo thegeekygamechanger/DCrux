@@ -180,13 +180,14 @@ fun HomeTab(settings: Settings, host: Host) {
     }
     if (weatherOpen) WeatherSheet(settings) { weatherOpen = false }
 
+    fun syncNow() {
+        weatherTick++
+        if (channels?.isEmpty() == true) askChannel = true
+        else { pulled = true; g.sync.syncNow() }
+    }
     PullToRefreshBox(
         isRefreshing = pulled && sync.running,
-        onRefresh = {
-            weatherTick++
-            if (channels?.isEmpty() == true) askChannel = true
-            else { pulled = true; g.sync.syncNow() }
-        },
+        onRefresh = { syncNow() },
         modifier = Modifier.fillMaxSize().statusBarsPadding(),
     ) {
     LazyColumn(
@@ -197,6 +198,8 @@ fun HomeTab(settings: Settings, host: Host) {
         item("bar") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TabTitle("DCrux", Modifier.weight(1f))
+                // On a computer there is no pulling down with a mouse, so syncing gets a button.
+                if (g.platform.isDesktop) FilledTonalIconButton(onClick = { syncNow() }, enabled = !sync.running) { Icon(Icons.Rounded.Sync, "Sync now") }
                 FilledTonalIconButton(onClick = { nav.searchOpen = true }) { Icon(Icons.Rounded.Search, "Search") }
             }
         }
@@ -415,7 +418,7 @@ private fun ChannelCard(channel: Channel, settings: Settings, startExpanded: Boo
                 Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp)) {
                     if (videos.isEmpty()) {
                         Text(
-                            "No videos synced yet. Pull down to sync.", Modifier.padding(12.dp),
+                            if (g.platform.isDesktop) "No videos synced yet. Press the sync button at the top." else "No videos synced yet. Pull down to sync.", Modifier.padding(12.dp),
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

@@ -228,7 +228,7 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
                             TurnHint(onSkip = { hint = false })
                         }
                     }
-                    if (!full) PaginationBar(
+                    if (!full || g.platform.isDesktop) PaginationBar(
                         pager.currentPage, pageCount,
                         onPage = { p -> scope.launch { pager.animateScrollToPage(p.coerceIn(0, pageCount - 1)) } },
                         modifier = Modifier.padding(vertical = 8.dp).navigationBarsPadding(),

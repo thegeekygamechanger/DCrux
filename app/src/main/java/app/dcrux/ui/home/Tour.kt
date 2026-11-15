@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -95,7 +96,10 @@ fun Tour(onTab: (Int) -> Unit) {
                     transitionSpec = { (slideInHorizontally { it / 3 } + fadeIn()) togetherWith (slideOutHorizontally { -it / 3 } + fadeOut()) },
                     label = "tour",
                 ) { i ->
-                    val step = steps[i]
+                    val step = steps[i].let {
+                        if (i == 0 && g.platform.isDesktop) it.copy(title = "Sync when you like", body = "The round arrows at the top of the Crux screen fetch the latest videos and headlines. DCrux also catches up by itself when you open it.", icon = Icons.Rounded.Sync)
+                        else it
+                    }
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (step.icon == null) PullDownArt() else IconArt(step.icon)
                         Spacer(Modifier.height(16.dp))
