@@ -10,7 +10,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -55,7 +54,7 @@ class ClaudeException(val kind: Kind, message: String, val status: Int = 0, val 
         }
 }
 
-data class Completion(val text: String, val model: String)
+data class Completion(val text: String, val model: String, val thinking: String = "")
 
 /** How to reach the DCrux service: its address, this install's id and the secret requests are signed with. */
 class ServiceAuth(val baseUrl: String, val deviceId: String, val secret: ByteArray)
@@ -138,6 +137,8 @@ class ClaudeClient {
         schema: JsonObject? = null,
         effort: String = "low",
         maxTokens: Int = 16000,
+        showThinking: Boolean = false,
+        onThinking: (String) -> Unit = {},
         onText: (String) -> Unit = {},
     ): Completion = withContext(Dispatchers.IO) {
         val useSchema = schema != null && model.structured
@@ -166,6 +167,12 @@ class ClaudeClient {
                     }
                 }
             }
+            // Ask for the model's own summary of its reasoning (it is never the raw reasoning, and only
+            // the current models offer it; older ones would reject the setting).
+            if (showThinking && ADAPTIVE.containsMatchIn(model.id)) putJsonObject("thinking") {
+                put("type", "adaptive")
+                put("display", "summarized")
+            }
             // If a safety classifier declines, let the API retry on its recommended model.
             if (model.fallbacks) put("fallbacks", "default")
         }
@@ -182,6 +189,7 @@ class ClaudeClient {
             res.use { r ->
                 if (!r.isSuccessful) throw httpError(r, r.body.string())
                 val sb = StringBuilder()
+                val thought = StringBuilder()
                 var stop: String? = null
                 var served = model.id
                 val src = r.body.source()
@@ -201,9 +209,15 @@ class ClaudeClient {
                             }
                             "content_block_delta" -> {
                                 val d = ev["delta"]?.jsonObject
-                                if (d?.get("type")?.jsonPrimitive?.content == "text_delta") {
-                                    sb.append(d["text"]?.jsonPrimitive?.content.orEmpty())
-                                    onText(sb.toString())
+                                when (d?.get("type")?.jsonPrimitive?.content) {
+                                    "text_delta" -> {
+                                        sb.append(d["text"]?.jsonPrimitive?.content.orEmpty())
+                                        onText(sb.toString())
+                                    }
+                                    "thinking_delta" -> {
+                                        thought.append(d["thinking"]?.jsonPrimitive?.content.orEmpty())
+                                        if (thought.isNotBlank()) onThinking(thought.toString())
+                                    }
                                 }
                             }
                             "message_delta" -> ev["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.let { if (it.isString) stop = it.content }
@@ -222,7 +236,7 @@ class ClaudeClient {
                     "max_tokens" -> throw ClaudeException(ClaudeException.Kind.TRUNCATED, "max_tokens")
                     null -> throw ClaudeException(ClaudeException.Kind.NETWORK, "The stream ended early")
                 }
-                Completion(sb.toString(), served)
+                Completion(sb.toString(), served, thought.toString().trim())
             }
         } finally {
             handle.dispose()
@@ -265,5 +279,8 @@ class ClaudeClient {
         const val VERSION = "2026-10-21"
         const val FALLBACK_BETA = "server-side-fallback-2026-07-01"
         val EFFORTS = listOf("low", "medium", "high", "xhigh", "max")
+
+        /** Models that take adaptive thinking with a summary. */
+        private val ADAPTIVE = Regex("^claude-(fable|mythos|opus-5|opus-4-[678]|sonnet-5|sonnet-4-6|haiku-5)")
     }
 }

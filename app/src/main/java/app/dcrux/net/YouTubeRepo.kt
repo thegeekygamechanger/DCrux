@@ -3,6 +3,10 @@ package app.dcrux.net
 import app.dcrux.data.AppJson
 import app.dcrux.data.Dates
 import app.dcrux.data.Video
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -20,7 +24,8 @@ data class ResolvedLink(
     val video: Video? = null,
 )
 
-data class ChannelFeed(val title: String, val videos: List<Video>)
+/** [approximateDates] is true when the dates came from "2d ago" style text rather than timestamps. */
+data class ChannelFeed(val title: String, val videos: List<Video>, val approximateDates: Boolean = false)
 
 /** A caption track the video offers. [kind] is "asr" for auto-generated captions. */
 data class CaptionTrack(val lang: String, val kind: String, val vssId: String)
@@ -33,6 +38,10 @@ data class CaptionTrack(val lang: String, val kind: String, val vssId: String)
 class YouTubeRepo {
     private val cookies = mapOf("Cookie" to "SOCS=CAI; CONSENT=YES+1")
     private val idRe = Regex("""UC[\w-]{22}""")
+
+    private companion object {
+        const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    }
 
     /** Pulls every YouTube link out of pasted text (newlines, commas, spaces all work). */
     fun extractLinks(text: String): List<String> =
@@ -146,10 +155,26 @@ class YouTubeRepo {
         }.getOrDefault(emptyList())
     }
 
-    /** The channel's public Atom feed: its latest uploads and live streams. */
+    /**
+     * A channel's latest uploads and live streams. YouTube's feed is the first choice, but it
+     * goes missing from time to time (it answers 404 for hours), so there are two fallbacks:
+     * the same feed under the channel's uploads list, then the channel's own Videos and Live
+     * pages. Only when all three fail does the sync report a problem.
+     */
     suspend fun fetchFeed(channelId: String): ChannelFeed {
         require(idRe.matches(channelId)) { "Bad channel id" }
-        val xml = Http.getText("https://www.youtube.com/feeds/videos.xml?channel_id=$channelId")
+        val feeds = listOf(
+            "https://www.youtube.com/feeds/videos.xml?channel_id=$channelId",
+            "https://www.youtube.com/feeds/videos.xml?playlist_id=UU${channelId.removePrefix("UC")}",
+        )
+        for (url in feeds) {
+            runCatching { parseFeed(Http.getText(url), channelId) }.getOrNull()?.takeIf { it.videos.isNotEmpty() }?.let { return it }
+        }
+        return runCatching { fetchFromPages(channelId) }.getOrNull()?.takeIf { it.videos.isNotEmpty() }
+            ?: throw java.io.IOException("YouTube did not answer. It will be tried again on the next sync.")
+    }
+
+    private fun parseFeed(xml: String, channelId: String): ChannelFeed {
         val doc = Jsoup.parse(xml, "", Parser.xmlParser())
         val title = doc.selectFirst("feed > title")?.text().orEmpty()
         val videos = doc.select("entry").mapNotNull { e ->
@@ -167,6 +192,77 @@ class YouTubeRepo {
         }
         return ChannelFeed(title, videos)
     }
+
+    /** Reads the video list that the channel's Videos and Live pages carry for any browser. */
+    private suspend fun fetchFromPages(channelId: String): ChannelFeed {
+        val headers = cookies + mapOf("User-Agent" to DESKTOP_UA, "Accept-Language" to "en")
+        var title = ""
+        val videos = LinkedHashMap<String, Video>()
+        for (tab in listOf("streams", "videos")) {
+            val html = runCatching { Http.getText("https://www.youtube.com/channel/$channelId/$tab", headers) }.getOrNull() ?: continue
+            if (title.isBlank()) title = meta(html, "og:title").orEmpty()
+            val start = html.indexOf("var ytInitialData = ")
+            val end = if (start >= 0) html.indexOf(";</script>", start) else -1
+            if (start < 0 || end < 0) continue
+            val root = runCatching { AppJson.parseToJsonElement(html.substring(html.indexOf('{', start), end)) }.getOrNull() ?: continue
+            val items = ArrayList<JsonObject>()
+            collect(root, "lockupViewModel", items)
+            val now = System.currentTimeMillis()
+            for (item in items) {
+                val id = item["contentId"]?.jsonPrimitive?.content ?: continue
+                if (!Regex("""[\w-]{11}""").matches(id) || id in videos) continue
+                val meta = item["metadata"]?.jsonObject?.get("lockupMetadataViewModel")?.jsonObject ?: continue
+                val name = meta["title"]?.jsonObject?.get("content")?.jsonPrimitive?.content.orEmpty()
+                val texts = ArrayList<String>()
+                strings(item, texts)
+                // Not yet broadcast: there is nothing to watch or summarise.
+                if (texts.any { it == "Upcoming" || it.startsWith("Scheduled for") }) continue
+                val age = texts.firstNotNullOfOrNull(::ageOf) ?: continue
+                if (name.isNotBlank()) videos[id] = Video(id = id, channelId = channelId, title = name, publishedAt = now - age)
+            }
+        }
+        return ChannelFeed(title, videos.values.toList(), approximateDates = true)
+    }
+
+    private fun collect(el: JsonElement, key: String, out: MutableList<JsonObject>) {
+        when (el) {
+            is JsonObject -> el.forEach { (k, v) -> if (k == key && v is JsonObject) out += v else collect(v, key, out) }
+            is JsonArray -> el.forEach { collect(it, key, out) }
+            else -> {}
+        }
+    }
+
+    private fun strings(el: JsonElement, out: MutableList<String>) {
+        when (el) {
+            is JsonObject -> el.forEach { (k, v) ->
+                if ((k == "content" || k == "text") && v is JsonPrimitive && v.isString) out += v.content else strings(v, out)
+            }
+            is JsonArray -> el.forEach { strings(it, out) }
+            else -> {}
+        }
+    }
+
+    /** "2d ago", "Streamed 16h ago", "3 weeks ago" as milliseconds; null for anything else. */
+    private fun ageOf(text: String): Long? {
+        val m = Regex("""(\d+)\s*(second|sec|minute|min|hour|hr|day|week|wk|month|mo|year|yr|s|m|h|d|w|y)s?\s+ago""", RegexOption.IGNORE_CASE).find(text) ?: return null
+        val n = m.groupValues[1].toLong()
+        val unit = when (m.groupValues[2].lowercase()) {
+            "second", "sec", "s" -> 1_000L
+            "minute", "min", "m" -> 60_000L
+            "hour", "hr", "h" -> 3_600_000L
+            "day", "d" -> 86_400_000L
+            "week", "wk", "w" -> 7 * 86_400_000L
+            "month", "mo" -> 30 * 86_400_000L
+            else -> 365 * 86_400_000L
+        }
+        return n * unit
+    }
+
+    /** The exact time a video went out, from its watch page; used to firm up "2d ago" style dates. */
+    suspend fun publishedAt(videoId: String): Long? = runCatching {
+        val html = Http.getText("https://www.youtube.com/watch?v=$videoId", cookies)
+        Dates.parse(jsonString(html, "startTimestamp")) ?: Dates.parse(jsonString(html, "publishDate")) ?: Dates.parse(jsonString(html, "uploadDate"))
+    }.getOrNull()
 
     private fun meta(html: String, property: String): String? =
         Regex("""<meta (?:property|name)="${Regex.escape(property)}" content="([^"]*)"""").find(html)

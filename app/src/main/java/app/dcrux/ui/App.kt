@@ -15,6 +15,17 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -22,11 +33,8 @@ import app.dcrux.ui.components.appBackground
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
-import androidx.compose.material.icons.automirrored.rounded.LibraryBooks
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Newspaper
 import androidx.compose.material.icons.outlined.Quiz
@@ -39,8 +47,6 @@ import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -129,7 +135,6 @@ private fun AppNav(nav: Nav, settings: Settings, activity: MainActivity) {
                 is Screen.Reader -> ReaderScreen(screen, settings)
                 is Screen.Browser -> BrowserScreen(screen.url, screen.title, settings)
                 Screen.Search -> SearchScreen(settings)
-                Screen.Settings -> SettingsScreen(settings, asTab = false)
                 Screen.About -> AboutScreen()
                 is Screen.TestRun -> TestRunScreen(screen)
                 is Screen.TestReview -> TestReviewScreen(screen.id, screen.fresh)
@@ -157,22 +162,29 @@ private fun TabsScreen(nav: Nav, settings: Settings, activity: MainActivity) {
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            // A floating, fully rounded bar rather than a strip glued to the bottom edge.
-            NavigationBar(
-                modifier = Modifier.navigationBarsPadding().padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
-                    .shadow(10.dp, RoundedCornerShape(34.dp)).clip(RoundedCornerShape(34.dp)),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                windowInsets = WindowInsets(0, 0, 0, 0),
-            ) {
-                tabs.forEachIndexed { i, t ->
-                    val selected = nav.tab == i
-                    val scale by animateFloatAsState(if (selected) 1.18f else 1f, spring(dampingRatio = 0.45f, stiffness = 380f), label = "tab")
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { nav.tab = i },
-                        icon = { Icon(if (selected) t.on else t.off, t.label, Modifier.graphicsLayer { scaleX = scale; scaleY = scale }) },
-                        label = { Text(t.label, maxLines = 1, softWrap = false) },
-                    )
+            // A compact floating pill, only as wide as it needs to be: icons for every tab,
+            // and the name spelled out for the one you are on.
+            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 10.dp, top = 4.dp), contentAlignment = Alignment.Center) {
+                Row(
+                    Modifier.shadow(12.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    tabs.forEachIndexed { i, t ->
+                        val selected = nav.tab == i
+                        val bg by animateColorAsState(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, label = "tabBg")
+                        val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, label = "tabTint")
+                        val scale by animateFloatAsState(if (selected) 1.1f else 1f, spring(dampingRatio = 0.45f, stiffness = 380f), label = "tab")
+                        Row(
+                            Modifier.height(48.dp).clip(CircleShape).background(bg)
+                                .selectable(selected = selected, role = Role.Tab, onClick = { nav.tab = i })
+                                .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 400f))
+                                .padding(horizontal = if (selected) 15.dp else 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(if (selected) t.on else t.off, t.label, Modifier.size(24.dp).graphicsLayer { scaleX = scale; scaleY = scale }, tint = tint)
+                            if (selected) Text(t.label, Modifier.padding(start = 8.dp), color = tint, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+                        }
+                    }
                 }
             }
         },

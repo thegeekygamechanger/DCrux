@@ -84,7 +84,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.dcrux.data.AppJson
 import app.dcrux.data.ExamRelevance
-import app.dcrux.ui.theme.BrandColors
 import app.dcrux.ui.theme.Heros
 import app.dcrux.ui.theme.LocalExtra
 
@@ -182,7 +181,7 @@ fun RelevancePill(json: String?, modifier: Modifier = Modifier) {
         modifier.clip(CircleShape).background(bg).padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("${shortExam(top.exam)} · ${top.score}", color = fg, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Text("${shortExam(top.exam)} ${top.score}/100", color = fg, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 
@@ -199,7 +198,7 @@ fun RelevancePanel(json: String?, modifier: Modifier = Modifier) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(r.exam, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "${levelWord(r.score)} · ${r.score}", color = fg, style = MaterialTheme.typography.labelMedium,
+                        "${levelWord(r.score)} · ${r.score}/100", color = fg, style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.clip(CircleShape).background(bg).padding(horizontal = 10.dp, vertical = 3.dp),
                     )
                 }

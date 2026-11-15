@@ -2,6 +2,7 @@ package app.dcrux.ai
 
 import app.dcrux.Graph
 import app.dcrux.data.AppJson
+import app.dcrux.data.Ask
 import app.dcrux.data.Dates
 import app.dcrux.data.ExamRelevance
 import app.dcrux.data.ModelInfo
@@ -168,8 +169,8 @@ class AiRepo(private val g: Graph) {
                         append("2 to 6 items, short labels, valid JSON on a single line, at most ").append(if (detailed) 4 else 2).append(" diagrams, and only content from the material. Skip diagrams when nothing calls for one.\n")
                     }
                     if (captions == null) append("Because only the title and description are available, keep strictly to what they state, and open with one line saying this summary is limited to the description.\n")
-                    append("Then rate how relevant this video is (0-100) for each of these exams, with a one-line reason tied to the syllabus: ")
-                    append(exams.joinToString("; ")).append('.')
+                    append("Then rate how relevant this video is for each of these exams, with a one-line reason tied to the syllabus: ")
+                    append(exams.joinToString("; ")).append(".\n").append(SCORING)
                 }
                 val out = withModel { apiKey, model ->
                     val c = g.claude.complete(
@@ -213,9 +214,7 @@ class AiRepo(private val g: Graph) {
             append("Below are ").append(rows.size).append(' ').append(kind).append(". For each one, rate its relevance (0-100) for every exam in this list: ")
             append(exams.joinToString("; ")).append(".\n")
             append(
-                "Scale: 80-100 squarely in the syllabus and the kind of thing asked (polity, governance, economy, international relations, " +
-                    "environment, science and technology, schemes, reports, history and culture); 50-79 useful background; 20-49 marginal; " +
-                    "0-19 not exam material (crime, celebrity, sports results, routine politics).\n"
+                SCORING + "\n"
             )
             append("Per exam, \"note\" names the syllabus area in at most 10 words. The item-level \"note\" is one sentence on why it matters for an aspirant, ")
             append("using only what the headline and snippet say. Do not add facts that are not in them. Return every id exactly as given.\n\n")
@@ -332,6 +331,84 @@ class AiRepo(private val g: Graph) {
         return questions.take(count)
     }
 
+    // ---------------------------------------------------------------- ask about an article
+
+    /** A question being answered right now for one article. */
+    data class AskJob(val question: String, val text: String = "", val error: String? = null, val thinking: String = "")
+
+    /** The answer without the trailing ">> follow-up" lines the model is asked to add. */
+    fun answerOnly(raw: String): String = raw.lines().filterNot { it.trimStart().startsWith(">>") }.joinToString("\n").trim()
+
+    private fun followupsOf(raw: String): List<String> =
+        raw.lines().map { it.trim() }.filter { it.startsWith(">>") }.map { it.removePrefix(">>").trim() }.filter { it.length > 5 }.take(3)
+
+    /** Keyed by article id. An entry is there while its answer is being written, or after it failed. */
+    val asking = MutableStateFlow<Map<String, AskJob>>(emptyMap())
+
+    private val articleTexts = ConcurrentHashMap<String, String>()
+
+    fun clearAsk(articleId: String) = asking.update { it - articleId }
+
+    /**
+     * Answers [question] about [item] and saves the exchange. It runs outside the screen, so closing
+     * the sheet (or the app) does not lose it. The answer leans on the article's own text; earlier
+     * questions about the same article are passed along so follow-ups make sense.
+     */
+    fun ask(item: NewsItem, sourceName: String, question: String) {
+        val q = question.trim()
+        if (q.isEmpty() || asking.value[item.id]?.let { it.error == null } == true) return
+        asking.update { it + (item.id to AskJob(q)) }
+        g.scope.launch {
+            try {
+                val s = g.prefs.get()
+                val article = articleTexts[item.id] ?: g.news.articleText(item.link).also {
+                    if (it.isNotBlank()) { if (articleTexts.size > 20) articleTexts.clear(); articleTexts[item.id] = it }
+                }
+                val earlier = g.db.asks().latest(item.id, 4).reversed()
+                val user = buildString {
+                    append("A student is reading this news item and has a question about it.\n")
+                    append("Source: ").append(sourceName).append(" · ").append(item.section).append(" · ").append(Dates.longDay(item.publishedAt)).append('\n')
+                    append("Headline: ").append(item.title).append('\n')
+                    if (item.snippet.isNotBlank()) append("Summary line: ").append(item.snippet).append('\n')
+                    if (article.isNotBlank()) append("<article>\n").append(article).append("\n</article>\n")
+                    else append("The full article could not be loaded, so only the headline and summary line are available. Say so if the question needs more than they give.\n")
+                    if (earlier.isNotEmpty()) {
+                        append("\nEarlier questions and answers about this item:\n")
+                        earlier.forEach { append("Q: ").append(it.question).append("\nA: ").append(it.answer.take(1200)).append("\n") }
+                    }
+                    append("\nQuestion: ").append(q).append("\n\n")
+                    append("Answer for an aspirant of ").append(s.exams.joinToString(", ")).append(", in ").append(s.language).append(". ")
+                    append("Take everything about the news itself from the article; where it does not say, say that rather than guessing. ")
+                    append("Where it helps, add well-established syllabus background (provisions, institutions, definitions) under a line that begins \"Background:\". ")
+                    append("Be direct: a few short paragraphs or bullets, no preamble. Use only \"- \" bullets and **bold**.\n")
+                    append("After the answer, add exactly three short follow-up questions this student might ask next about this article, ")
+                    append("each on its own line beginning with \">> \" and nothing else on that line.")
+                }
+                val done = withModel { apiKey, model ->
+                    g.claude.complete(
+                        // Medium effort: the model reasons before answering more often, which is what the "thought process" shows.
+                        apiKey, model, SYSTEM, user, effort = "medium", maxTokens = 10000, showThinking = true,
+                        onThinking = { t -> asking.update { m -> m + (item.id to (m[item.id] ?: AskJob(q)).copy(thinking = t)) } },
+                        onText = { text -> asking.update { m -> m + (item.id to (m[item.id] ?: AskJob(q)).copy(text = text)) } },
+                    )
+                }
+                val answer = answerOnly(done.text)
+                if (answer.isBlank()) throw ClaudeException(ClaudeException.Kind.PARSE, "empty")
+                val row = Ask(
+                    articleId = item.id, question = q, answer = answer, askedAt = System.currentTimeMillis(),
+                    thinking = done.thinking, followups = followupsOf(done.text).joinToString("\n"),
+                )
+                g.db.asks().insert(row)
+                asking.update { it - item.id }
+            } catch (e: CancellationException) {
+                asking.update { it - item.id }
+                throw e
+            } catch (e: Exception) {
+                asking.update { it + (item.id to AskJob(q, error = describe(e))) }
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- search overview
 
     /** Streams a short overview written only from the search hits it is given. */
@@ -353,6 +430,19 @@ class AiRepo(private val g: Graph) {
     companion object {
         /** Default first, then progressively lighter models. */
         val AUTO_ORDER = listOf("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")
+
+        /**
+         * One rubric for every score in the app, so 70 means the same thing on a video and on a headline.
+         * The score is the sum of four parts and is always out of 100.
+         */
+        const val SCORING =
+            "Score each exam out of 100 as the sum of four parts, and use the whole range: " +
+                "syllabus fit, 0-40 (is the topic named in that exam's syllabus? state-level exams also count their own state's affairs); " +
+                "likelihood of a question, 0-30 (the kind of thing that exam has asked: polity, governance, economy, international relations, " +
+                "environment, science and technology, schemes, reports, history and culture rank high; crime, celebrity, sports results and routine politics rank near zero); " +
+                "depth, 0-20 (does it explain concepts, causes or provisions, not just an event?); " +
+                "currency, 0-10 (is it about a development of the past year?). " +
+                "A score of 70 or more means study this, 45-69 worth a read, below 45 skip. Give the total only, as a whole number from 0 to 100."
 
         const val SYSTEM =
             "You are DCrux, a study assistant for Indian competitive-exam aspirants (UPSC and State PSCs). " +

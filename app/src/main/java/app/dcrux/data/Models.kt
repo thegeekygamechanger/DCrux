@@ -65,6 +65,20 @@ data class TestRecord(
     val payload: String,
 )
 
+/** A question the user asked about one news item, with the answer it got. Kept until the app is reset. */
+@Entity(tableName = "asks", indices = [Index("articleId")])
+data class Ask(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val articleId: String,
+    val question: String,
+    val answer: String,
+    val askedAt: Long,
+    /** The model's own summary of how it reasoned, shown on request. */
+    val thinking: String = "",
+    /** Suggested next questions, one per line. */
+    val followups: String = "",
+)
+
 @Serializable
 data class ExamRelevance(val exam: String, val score: Int, val note: String = "")
 

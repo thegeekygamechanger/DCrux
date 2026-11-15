@@ -32,7 +32,7 @@ if (!cfg.apiKey || !cfg.appSecret) {
   process.exit(1);
 }
 
-const ALLOWED_BODY_KEYS = new Set(['model', 'max_tokens', 'stream', 'system', 'messages', 'output_config', 'fallbacks']);
+const ALLOWED_BODY_KEYS = new Set(['model', 'max_tokens', 'stream', 'system', 'messages', 'output_config', 'fallbacks', 'thinking']);
 const ALLOWED_BETAS = new Set(['server-side-fallback-2026-07-01']);
 
 // ---- daily counters (India time, since that is where the users are) ----
@@ -142,6 +142,8 @@ const server = http.createServer(async (req, res) => {
       for (const k of Object.keys(json)) if (!ALLOWED_BODY_KEYS.has(k)) { send(res, 400, 'invalid_request_error', `"${k}" is not available through this service.`); return log(400, `key ${k}`); }
       if (!cfg.models.includes(json.model)) { send(res, 404, 'not_found_error', 'That model is not available through this service.'); return log(404, String(json.model).slice(0, 40)); }
       if (!Array.isArray(json.messages) || json.messages.length === 0 || json.messages.length > 4) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400); }
+      // The only thinking setting accepted is "adaptive, with a summary" (used by Ask AI).
+      if (json.thinking !== undefined) json.thinking = { type: 'adaptive', display: 'summarized' };
       json.max_tokens = Math.min(Number(json.max_tokens) || 1024, cfg.maxTokens);
       json.stream = true;
 

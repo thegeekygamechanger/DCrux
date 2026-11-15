@@ -60,13 +60,19 @@ class SyncManager(private val g: Graph) {
                 state.value = SyncState(running = true, message = "Syncing ${ch.title}")
                 try {
                     val feed = g.youtube.fetchFeed(ch.id)
-                    g.db.videos().insertAll(feed.videos)
+                    val inserted = g.db.videos().insertAll(feed.videos)
                     feed.videos.forEach { g.db.videos().updateMeta(it.id, it.title, it.description) }
+                    if (feed.approximateDates) {
+                        // Dates read as "2d ago" are firmed up for the newest few videos that are new to the app.
+                        feed.videos.filterIndexed { i, _ -> inserted.getOrElse(i) { -1L } != -1L }.sortedByDescending { it.publishedAt }.take(6).forEach { v ->
+                            g.youtube.publishedAt(v.id)?.let { g.db.videos().setPublishedAt(v.id, it) }
+                        }
+                    }
                     val avatar = if (ch.avatarUrl.isBlank()) runCatching { g.youtube.resolve(ch.url.ifBlank { "https://www.youtube.com/channel/${ch.id}" }).avatar }.getOrDefault("") else ""
                     g.db.channels().touch(ch.id, feed.title, avatar, System.currentTimeMillis())
                     ok++
                 } catch (e: Exception) {
-                    errors += "${ch.title}: ${e.message ?: "failed"}"
+                    errors += "${ch.title}: ${if (e is java.io.IOException && e.message?.startsWith("YouTube") == true) e.message else "could not be reached"}"
                 }
             }
 

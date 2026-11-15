@@ -158,6 +158,8 @@ fun VideoScreen(videoId: String, settings: Settings) {
             }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Open in YouTube") }
         }
 
+        // One scrolling column: the player moves up with the page instead of staying pinned above it.
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
         YouTubePlayer(
             videoId, controller,
             Modifier.padding(horizontal = 12.dp).fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(24.dp)).background(Color.Black),
@@ -173,10 +175,10 @@ fun VideoScreen(videoId: String, settings: Settings) {
         )
 
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp),
+            Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            if (v == null) return@Column
+        ) inner@{
+            if (v == null) return@inner
             Text(v.title, style = MaterialTheme.typography.headlineSmall)
             Text(Dates.dateTime(v.publishedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (playerError != null) {
@@ -283,6 +285,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                     }
                 }
             }
+        }
         }
     }
 }

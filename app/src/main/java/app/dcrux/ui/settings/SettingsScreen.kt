@@ -87,6 +87,9 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import app.dcrux.BuildConfig
+import app.dcrux.data.Dates
 import androidx.compose.ui.unit.dp
 import app.dcrux.ui.components.appBackground
 import app.dcrux.ai.ClaudeException
@@ -112,18 +115,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** One group of settings: an icon, a name, a line saying what is set now, and the controls when opened. */
 @Composable
-private fun Section(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
-    Column {
-        Row(Modifier.padding(start = 4.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-                Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+private fun Section(title: String, icon: ImageVector, summary: String, open: Boolean, onToggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val turn by animateFloatAsState(if (open) 180f else 0f, label = "section")
+    CruxCard(Modifier.fillMaxWidth(), color = if (open) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.animateContentSize()) {
+            Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                    Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Icon(Icons.Rounded.ExpandMore, if (open) "Close" else "Open", Modifier.rotate(turn))
             }
-            Spacer(Modifier.width(10.dp))
-            Text(title, style = MaterialTheme.typography.titleLarge)
-        }
-        CruxCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(vertical = 8.dp).animateContentSize(), content = content)
+            if (open) Column(Modifier.padding(bottom = 8.dp), content = content)
         }
     }
 }
@@ -218,7 +227,8 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             adding = false
         }
     }
-    var examsOpen by rememberSaveable { mutableStateOf(false) }
+    // Which group is open; opening one closes the other, so the page stays a short, ordered list.
+    var openSection by rememberSaveable { mutableStateOf("") }
     var sourcesOpen by rememberSaveable { mutableStateOf(false) }
 
     // dialogs
@@ -247,10 +257,10 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
         LazyColumn(
             if (asTab) Modifier.weight(1f) else Modifier.weight(1f).navigationBarsPadding(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item("crux") {
-                Section("Your crux", Icons.Rounded.AutoAwesome) {
+                Section("Your crux", Icons.Rounded.AutoAwesome, if (channels.isEmpty()) "No channels yet" else channels.joinToString(", ") { it.title }, openSection == "crux", { openSection = if (openSection == "crux") "" else "crux" }) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Add YouTube channels", style = MaterialTheme.typography.titleMedium)
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -284,22 +294,82 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                 }
             }
 
-            item("look") {
-                Section("Appearance", Icons.Rounded.Palette) {
-                    SwitchRow("Dark theme", if (settings.themeMode == "system") "Following the system right now" else null, dark) {
-                        scope.launch { g.prefs.setTheme(if (it) "dark" else "light") }
+            item("exams") {
+                Section("Your exams", Icons.Rounded.School, settings.exams.joinToString(", ") { shortExam(it) }, openSection == "exams", { openSection = if (openSection == "exams") "" else "exams" }) {
+                    AnimatedVisibility(true) {
+                        Column {
+                            ExamCatalog.forEach { (group, exams) ->
+                                Label(group)
+                                FlowRow(Modifier.padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    exams.forEach { e ->
+                                        val on = e in settings.exams
+                                        FilterChip(
+                                            selected = on, shape = CircleShape, label = { Text(shortExam(e)) },
+                                            onClick = {
+                                                val next = if (on) settings.exams - e else settings.exams + e
+                                                if (next.isNotEmpty()) scope.launch { g.prefs.setExams(next) }
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
                     }
-                    SwitchRow("Follow system", null, settings.themeMode == "system") {
-                        scope.launch { g.prefs.setTheme(if (it) "system" else if (dark) "dark" else "light") }
+                }
+            }
+
+            item("papers") {
+                Section("Papers", Icons.Rounded.Newspaper, Sources.builtIn.filter { it.id in settings.enabledSources }.joinToString(", ") { it.name }.ifBlank { "No sources" }, openSection == "papers", { openSection = if (openSection == "papers") "" else "papers" }) {
+                    SwitchRow("Page-turn animation", null, settings.pageFlip) { scope.launch { g.prefs.setPageFlip(it) } }
+                    SwitchRow("Block ads and trackers", "In the in-app browser", settings.blockAds) { scope.launch { g.prefs.setBlockAds(it) } }
+                    Label("Crux sources")
+                    Fold(Sources.builtIn.filter { it.id in settings.enabledSources }.joinToString(", ") { it.name }.ifBlank { "None" }, sourcesOpen) { sourcesOpen = !sourcesOpen }
+                    AnimatedVisibility(sourcesOpen) {
+                        Column {
+                            Sources.builtIn.forEach { s ->
+                                SwitchRow(s.name, null, s.id in settings.enabledSources) { on ->
+                                    scope.launch { g.prefs.setEnabledSources(if (on) settings.enabledSources + s.id else settings.enabledSources - s.id) }
+                                }
+                            }
+                        }
                     }
-                    SwitchRow("Wallpaper colours", if (Build.VERSION.SDK_INT >= 31) "Use Material You colours from your wallpaper" else "Needs Android 12 or newer", settings.dynamicColor, enabled = Build.VERSION.SDK_INT >= 31) {
-                        scope.launch { g.prefs.setDynamic(it) }
+                    Label("Your own sources")
+                    settings.customSources.forEach { c ->
+                        Row(Modifier.padding(start = 18.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(c.name, style = MaterialTheme.typography.titleSmall)
+                                Text(c.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                            IconButton(onClick = {
+                                scope.launch {
+                                    g.prefs.setCustomSources(settings.customSources - c)
+                                    withContext(Dispatchers.IO) { g.db.news().deleteForSource(c.id) }
+                                }
+                            }) { Icon(Icons.Rounded.DeleteOutline, "Remove source") }
+                        }
+                    }
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(customName, { customName = it }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(20.dp), label = { Text("Name") })
+                        OutlinedTextField(
+                            customUrl, { customUrl = it.trim() }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(20.dp),
+                            label = { Text("RSS feed or public Telegram channel link") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        )
+                        FilledTonalButton(
+                            enabled = customName.isNotBlank() && customUrl.length > 8,
+                            onClick = {
+                                val c = CustomSource("c" + System.currentTimeMillis().toString(36), customName.trim(), customUrl)
+                                customName = ""; customUrl = ""
+                                scope.launch { g.prefs.setCustomSources(settings.customSources + c); g.sync.syncNow() }
+                            },
+                        ) { Text("Add source") }
                     }
                 }
             }
 
             item("claude") {
-                Section("AI", Icons.Rounded.Psychology) {
+                Section("AI", Icons.Rounded.Psychology, (if (settings.autoModel) "Automatic model" else settings.modelId.removePrefix("claude-").ifBlank { "Chosen model" }) + " · " + settings.language, openSection == "claude", { openSection = if (openSection == "claude") "" else "claude" }) {
                     // A build that ships with its own key shows no key controls at all.
                     if (!g.hasBuiltInKey) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -404,34 +474,8 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                 }
             }
 
-            item("exams") {
-                Section("Your exams", Icons.Rounded.School) {
-                    Fold(settings.exams.joinToString(", ") { shortExam(it) }, examsOpen) { examsOpen = !examsOpen }
-                    AnimatedVisibility(examsOpen) {
-                        Column {
-                            ExamCatalog.forEach { (group, exams) ->
-                                Label(group)
-                                FlowRow(Modifier.padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    exams.forEach { e ->
-                                        val on = e in settings.exams
-                                        FilterChip(
-                                            selected = on, shape = CircleShape, label = { Text(shortExam(e)) },
-                                            onClick = {
-                                                val next = if (on) settings.exams - e else settings.exams + e
-                                                if (next.isNotEmpty()) scope.launch { g.prefs.setExams(next) }
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                        }
-                    }
-                }
-            }
-
             item("sync") {
-                Section("Sync", Icons.Rounded.Sync) {
+                Section("Sync", Icons.Rounded.Sync, (if (settings.dailySync) "Daily" else "Manual") + " · last synced " + Dates.ago(settings.lastSync), openSection == "sync", { openSection = if (openSection == "sync") "" else "sync" }) {
                     SwitchRow("Daily auto-sync", "Every morning, in the background", settings.dailySync) {
                         scope.launch { g.prefs.setDailySync(it); SyncManager.schedule(context, it, settings.wifiOnly) }
                     }
@@ -448,57 +492,22 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                 }
             }
 
-            item("papers") {
-                Section("Papers", Icons.Rounded.Newspaper) {
-                    SwitchRow("Page-turn animation", null, settings.pageFlip) { scope.launch { g.prefs.setPageFlip(it) } }
-                    SwitchRow("Block ads and trackers", "In the in-app browser", settings.blockAds) { scope.launch { g.prefs.setBlockAds(it) } }
-                    Label("Crux sources")
-                    Fold(Sources.builtIn.filter { it.id in settings.enabledSources }.joinToString(", ") { it.name }.ifBlank { "None" }, sourcesOpen) { sourcesOpen = !sourcesOpen }
-                    AnimatedVisibility(sourcesOpen) {
-                        Column {
-                            Sources.builtIn.forEach { s ->
-                                SwitchRow(s.name, null, s.id in settings.enabledSources) { on ->
-                                    scope.launch { g.prefs.setEnabledSources(if (on) settings.enabledSources + s.id else settings.enabledSources - s.id) }
-                                }
-                            }
-                        }
+            item("look") {
+                Section("Appearance", Icons.Rounded.Palette, when (settings.themeMode) { "dark" -> "Dark"; "light" -> "Light"; else -> "Follows the phone" }, openSection == "look", { openSection = if (openSection == "look") "" else "look" }) {
+                    SwitchRow("Dark theme", if (settings.themeMode == "system") "Following the system right now" else null, dark) {
+                        scope.launch { g.prefs.setTheme(if (it) "dark" else "light") }
                     }
-                    Label("Your own sources")
-                    settings.customSources.forEach { c ->
-                        Row(Modifier.padding(start = 18.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(c.name, style = MaterialTheme.typography.titleSmall)
-                                Text(c.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                            }
-                            IconButton(onClick = {
-                                scope.launch {
-                                    g.prefs.setCustomSources(settings.customSources - c)
-                                    withContext(Dispatchers.IO) { g.db.news().deleteForSource(c.id) }
-                                }
-                            }) { Icon(Icons.Rounded.DeleteOutline, "Remove source") }
-                        }
+                    SwitchRow("Follow system", null, settings.themeMode == "system") {
+                        scope.launch { g.prefs.setTheme(if (it) "system" else if (dark) "dark" else "light") }
                     }
-                    Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(customName, { customName = it }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(20.dp), label = { Text("Name") })
-                        OutlinedTextField(
-                            customUrl, { customUrl = it.trim() }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(20.dp),
-                            label = { Text("RSS feed or public Telegram channel link") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        )
-                        FilledTonalButton(
-                            enabled = customName.isNotBlank() && customUrl.length > 8,
-                            onClick = {
-                                val c = CustomSource("c" + System.currentTimeMillis().toString(36), customName.trim(), customUrl)
-                                customName = ""; customUrl = ""
-                                scope.launch { g.prefs.setCustomSources(settings.customSources + c); g.sync.syncNow() }
-                            },
-                        ) { Text("Add source") }
+                    SwitchRow("Wallpaper colours", if (Build.VERSION.SDK_INT >= 31) "Use Material You colours from your wallpaper" else "Needs Android 12 or newer", settings.dynamicColor, enabled = Build.VERSION.SDK_INT >= 31) {
+                        scope.launch { g.prefs.setDynamic(it) }
                     }
                 }
             }
 
             item("lock") {
-                Section("Security", Icons.Rounded.Lock) {
+                Section("Security", Icons.Rounded.Lock, if (settings.lockEnabled) "App lock is on" else "App lock is off", openSection == "lock", { openSection = if (openSection == "lock") "" else "lock" }) {
                     SwitchRow("App lock", "Biometrics first, then your PIN. Covers the whole app, including test results", settings.lockEnabled) { on ->
                         if (on) pinSetup = true else pinConfirmFor = "off"
                     }
@@ -518,8 +527,15 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                 }
             }
 
+            item("update") {
+                Section("App update", Icons.Rounded.SystemUpdate, "Version " + BuildConfig.VERSION_NAME, openSection == "update", { openSection = if (openSection == "update") "" else "update" }) {
+                    UpdatePanel(Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+                    SwitchRow("Check for updates automatically", "Once a day, from GitHub", settings.autoUpdate) { scope.launch { g.prefs.setAutoUpdate(it) } }
+                }
+            }
+
             item("data") {
-                Section("Data", Icons.Rounded.Storage) {
+                Section("Data", Icons.Rounded.Storage, "Kept on this phone until you reset", openSection == "data", { openSection = if (openSection == "data") "" else "data" }) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
                             "Everything stays on this phone and is kept until you reset: channels, history, summaries, headlines and encrypted test results. Nothing is backed up to the cloud.",
@@ -530,13 +546,6 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
                         ) { Text("Reset app") }
                     }
-                }
-            }
-
-            item("update") {
-                Section("App update", Icons.Rounded.SystemUpdate) {
-                    UpdatePanel(Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
-                    SwitchRow("Check for updates automatically", "Once a day, from GitHub", settings.autoUpdate) { scope.launch { g.prefs.setAutoUpdate(it) } }
                 }
             }
 

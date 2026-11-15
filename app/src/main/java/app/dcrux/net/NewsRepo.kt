@@ -158,6 +158,19 @@ class NewsRepo {
         results.flatMap { it.getOrDefault(emptyList()) }.distinctBy { it.id }
     }
 
+    /**
+     * The readable text of an article's page, for answering a question about it. It is fetched
+     * when asked, handed to the AI and dropped; empty when the page cannot be read.
+     */
+    suspend fun articleText(link: String): String = runCatching {
+        val doc = Jsoup.parse(Http.getText(link), link)
+        doc.select("script, style, nav, footer, aside, form, figure, noscript, button").remove()
+        val best = doc.select("article, [itemprop=articleBody], main, section, div").maxByOrNull { el ->
+            el.select("> p, > div > p").sumOf { p -> p.text().length.let { if (it > 60) it else 0 } }
+        }
+        best?.select("h2, h3, p, li")?.map { it.text().trim() }?.filter { it.length > 1 }?.distinct()?.joinToString("\n")?.take(14_000).orEmpty()
+    }.getOrDefault("")
+
     private suspend fun fetchFeed(source: NewsSource, feed: Feed): List<NewsItem> {
         val url = normalise(feed.url)
         // Publisher feeds hiccup now and then; one quiet second try before calling it a failure.

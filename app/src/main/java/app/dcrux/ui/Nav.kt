@@ -30,7 +30,6 @@ sealed interface Screen {
     data class Reader(val title: String, val body: String, val meta: String = "", val link: String? = null, val relevance: String? = null, val note: String? = null) : Screen
     data class Browser(val url: String, val title: String) : Screen
     data object Search : Screen
-    data object Settings : Screen
     data object About : Screen
     data class TestRun(val title: String, val exam: String, val difficulty: String, val dayKey: String, val questions: List<QuizQuestion>) : Screen
     data class TestReview(val id: Long, val fresh: Boolean = false) : Screen

@@ -8,6 +8,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -58,6 +60,9 @@ interface VideoDao {
         "UPDATE videos SET title = :title, description = CASE WHEN :desc = '' THEN description ELSE :desc END WHERE id = :id"
     )
     suspend fun updateMeta(id: String, title: String, desc: String)
+
+    @Query("UPDATE videos SET publishedAt = :at WHERE id = :id")
+    suspend fun setPublishedAt(id: String, at: Long)
 
     @Query("UPDATE videos SET summary = :text, basis = :basis, aiModel = :model WHERE id = :id")
     suspend fun setSummary(id: String, text: String, basis: String, model: String)
@@ -144,15 +149,45 @@ interface TestDao {
     suspend fun get(id: Long): TestRecord?
 }
 
-@Database(entities = [Channel::class, Video::class, NewsItem::class, TestRecord::class], version = 1, exportSchema = false)
+@Dao
+interface AskDao {
+    @Query("SELECT * FROM asks WHERE articleId = :articleId ORDER BY askedAt ASC")
+    fun forArticle(articleId: String): Flow<List<Ask>>
+
+    @Query("SELECT COUNT(*) FROM asks WHERE articleId = :articleId")
+    fun count(articleId: String): Flow<Int>
+
+    @Query("SELECT * FROM asks WHERE articleId = :articleId ORDER BY askedAt DESC LIMIT :n")
+    suspend fun latest(articleId: String, n: Int): List<Ask>
+
+    @Insert
+    suspend fun insert(a: Ask): Long
+
+    @Query("DELETE FROM asks WHERE id = :id")
+    suspend fun delete(id: Long)
+}
+
+@Database(entities = [Channel::class, Video::class, NewsItem::class, TestRecord::class, Ask::class], version = 2, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun channels(): ChannelDao
     abstract fun videos(): VideoDao
     abstract fun news(): NewsDao
     abstract fun tests(): TestDao
+    abstract fun asks(): AskDao
 
     companion object {
+        /** 1 -> 2 adds the questions asked about articles. Nothing already on the phone is touched. */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `asks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `articleId` TEXT NOT NULL, " +
+                        "`question` TEXT NOT NULL, `answer` TEXT NOT NULL, `askedAt` INTEGER NOT NULL, `thinking` TEXT NOT NULL, `followups` TEXT NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_articleId` ON `asks` (`articleId`)")
+            }
+        }
+
         fun open(context: Context): AppDb =
-            Room.databaseBuilder(context, AppDb::class.java, "dcrux.db").build()
+            Room.databaseBuilder(context, AppDb::class.java, "dcrux.db").addMigrations(MIGRATION_1_2).build()
     }
 }
