@@ -1,8 +1,6 @@
 package app.dcrux.ui.home
 
-import android.Manifest
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import app.dcrux.LocalGraph
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,14 +47,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import app.dcrux.data.Dates
 import app.dcrux.data.Place
 import app.dcrux.data.Settings
-import app.dcrux.graph
 import app.dcrux.net.WeatherRepo
 import app.dcrux.ui.components.CruxLoader
 import app.dcrux.ui.components.CruxSheet
@@ -78,7 +74,7 @@ fun weatherIcon(code: Int): ImageVector = when (code) {
 /** Weather, the day's advisories and the choice of city, sliding up from the home header. */
 @Composable
 fun WeatherSheet(settings: Settings, onDismiss: () -> Unit) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val place = settings.place
@@ -109,7 +105,7 @@ fun WeatherSheet(settings: Settings, onDismiss: () -> Unit) {
         }
     }
 
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    val askLocation = g.platform.rememberLocationAsk { granted ->
         if (granted) useLocation() else message = "Location was not allowed. You can type your city instead."
     }
 
@@ -186,7 +182,7 @@ fun WeatherSheet(settings: Settings, onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 FilledTonalButton(
-                    onClick = { if (g.weather.hasLocationPermission()) useLocation() else permission.launch(Manifest.permission.ACCESS_COARSE_LOCATION) },
+                    onClick = { if (g.weather.hasLocationPermission()) useLocation() else askLocation() },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
                     Icon(Icons.Rounded.MyLocation, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Use my location")

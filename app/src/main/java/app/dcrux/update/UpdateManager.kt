@@ -24,34 +24,11 @@ import okhttp3.Request
 import java.io.IOException
 
 /** A newer build published on GitHub. */
-data class UpdateInfo(val version: String, val notes: String, val apkUrl: String, val sizeBytes: Long)
-
-sealed interface UpdateState {
-    data object Idle : UpdateState
-    data object Checking : UpdateState
-    data object UpToDate : UpdateState
-    data class Available(val info: UpdateInfo) : UpdateState
-    data class Downloading(val info: UpdateInfo, val percent: Int) : UpdateState
-    /** Android has not yet been told that DCrux may install its own updates. */
-    data class NeedsPermission(val info: UpdateInfo) : UpdateState
-    /** The system's own "Update this app?" prompt is showing (or about to). */
-    data class Confirming(val info: UpdateInfo) : UpdateState
-    data class Failed(val message: String, val info: UpdateInfo? = null) : UpdateState
-}
-
-/**
- * Over-the-air updates from the project's GitHub releases.
- *
- * The newest release's APK is streamed straight into Android's package installer: the app
- * never writes an APK file of its own, so there is nothing to clean up afterwards, and the
- * system replaces the old build with the new one. Android only accepts the update when it is
- * signed with the same key as the installed app, so a tampered download cannot be installed.
- */
-class UpdateManager(private val g: Graph) {
-    val state = MutableStateFlow<UpdateState>(UpdateState.Idle)
+class UpdateManager(private val g: Graph, private val app: android.app.Application) : Updates {
+    override val state = MutableStateFlow<UpdateState>(UpdateState.Idle)
 
     /** Looks at the latest release. Quietly does nothing more than once a day unless [force]d. */
-    suspend fun check(force: Boolean = false) {
+    override suspend fun check(force: Boolean) {
         if (state.value is UpdateState.Downloading || state.value is UpdateState.Confirming) return
         val settings = g.prefs.get()
         if (!force && (!settings.autoUpdate || System.currentTimeMillis() - settings.lastUpdateCheck < 24 * 3_600_000L)) return
@@ -63,7 +40,7 @@ class UpdateManager(private val g: Graph) {
             val asset = (root["assets"] as? JsonArray)?.map { it.jsonObject }
                 ?.firstOrNull { it["name"]?.jsonPrimitive?.content?.endsWith(".apk") == true }
             val url = asset?.get("browser_download_url")?.jsonPrimitive?.content
-            state.value = if (url != null && isNewer(version, BuildConfig.VERSION_NAME)) {
+            state.value = if (url != null && isNewer(version, g.platform.versionName)) {
                 UpdateState.Available(
                     UpdateInfo(version, root["body"]?.jsonPrimitive?.content.orEmpty().trim(), url, asset["size"]?.jsonPrimitive?.longOrNull ?: 0L)
                 )
@@ -80,29 +57,29 @@ class UpdateManager(private val g: Graph) {
     }
 
     /** True when Android will let DCrux hand it an update (always true before Android 8). */
-    fun mayInstall(): Boolean = Build.VERSION.SDK_INT < 26 || g.app.packageManager.canRequestPackageInstalls()
+    fun mayInstall(): Boolean = Build.VERSION.SDK_INT < 26 || app.packageManager.canRequestPackageInstalls()
 
     /** Every time the app comes to the front: pick up where an update was left, and look for a new one. */
-    fun onAppForeground() {
+    override fun onAppForeground() {
         val s = state.value
         if (s is UpdateState.NeedsPermission && mayInstall()) install(s.info)
         else g.scope.launch { check() }
     }
 
     /** Downloads the update into an installer session and hands it to Android to install. */
-    fun install(info: UpdateInfo) {
+    override fun install(info: UpdateInfo) {
         if (state.value is UpdateState.Downloading) return
         // Ask for the one-time permission first, in the app's own words, rather than downloading
         // and then running into Android's refusal.
         if (!mayInstall()) { state.value = UpdateState.NeedsPermission(info); return }
         state.value = UpdateState.Downloading(info, 0)
         g.scope.launch {
-            val installer = g.app.packageManager.packageInstaller
+            val installer = app.packageManager.packageInstaller
             var sessionId = -1
             try {
                 withContext(Dispatchers.IO) {
                     val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-                        setAppPackageName(g.app.packageName)
+                        setAppPackageName(app.packageName)
                         if (info.sizeBytes > 0) setSize(info.sizeBytes)
                     }
                     sessionId = installer.createSession(params)
@@ -128,7 +105,7 @@ class UpdateManager(private val g: Graph) {
                         }
                         val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                         val result = PendingIntent.getBroadcast(
-                            g.app, sessionId, Intent(g.app, UpdateReceiver::class.java).setAction(UpdateReceiver.ACTION).putExtra(UpdateReceiver.EXTRA_VERSION, info.version), flags,
+                            app, sessionId, Intent(app, UpdateReceiver::class.java).setAction(UpdateReceiver.ACTION).putExtra(UpdateReceiver.EXTRA_VERSION, info.version), flags,
                         )
                         pending = info
                         session.commit(result.intentSender)
@@ -163,9 +140,9 @@ class UpdateManager(private val g: Graph) {
     }
 
     /** Removes anything a broken-off update left with the system installer. */
-    fun cleanUp() {
+    override fun cleanUp() {
         runCatching {
-            val installer = g.app.packageManager.packageInstaller
+            val installer = app.packageManager.packageInstaller
             installer.mySessions.forEach { if (!it.isActive) installer.abandonSession(it.sessionId) }
         }
     }
@@ -199,7 +176,7 @@ class UpdateReceiver : BroadcastReceiver() {
             val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
             confirm?.let { runCatching { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
         }
-        context.graph.updates.onInstallResult(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))
+        (context.graph.updates as? UpdateManager)?.onInstallResult(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))
     }
 
     companion object {

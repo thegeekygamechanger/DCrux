@@ -1,5 +1,7 @@
 package app.dcrux.ui.components
 
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -33,7 +35,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.cos
@@ -49,7 +50,7 @@ fun CruxSheet(
     icon: ImageVector? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.9f).dp
+    val maxHeight = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height * 0.9f).toDp() }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).navigationBarsPadding()) {
             Row(Modifier.padding(start = 22.dp, end = 22.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {

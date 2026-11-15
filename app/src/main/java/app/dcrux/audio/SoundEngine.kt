@@ -1,10 +1,5 @@
 package app.dcrux.audio
 
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioManager
-import android.media.AudioTrack
-import android.os.SystemClock
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
 import kotlin.math.exp
@@ -358,11 +353,11 @@ private class BinauralVoice(private val beat: Float) : Voice() {
  * Every sound in Mind Flow is synthesised here, sample by sample, while it plays.
  * There are no recordings in the app, so there is nothing to license.
  */
-class SoundEngine {
+class SoundEngine(private val sink: (sampleRate: Int, frames: Int) -> app.dcrux.AudioSink, private val clock: () -> Long) {
     /** Target level per sound, 0..1. Absent or 0 means off. */
     val levels = ConcurrentHashMap<SoundId, Float>()
 
-    /** elapsedRealtime at which playback should have faded out; 0 = no timer. */
+    /** The clock time at which playback should have faded out; 0 = no timer. */
     @Volatile var stopAt = 0L
 
     /** The token of the loop that is allowed to run; replacing it retires the old loop. */
@@ -404,22 +399,16 @@ class SoundEngine {
     private fun loop(token: Any, onFinished: () -> Unit) {
         val voices = HashMap<SoundId, Voice>()
         val frames = 2048
-        val min = AudioTrack.getMinBufferSize(SR, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-        val track = AudioTrack(
-            AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build(),
-            AudioFormat.Builder().setSampleRate(SR).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build(),
-            maxOf(min, frames * 4 * 2), AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE,
-        )
+        val track = sink(SR, frames)
         val l = FloatArray(frames); val r = FloatArray(frames)
         val out = ShortArray(frames * 2)
         var master = 0f
         try {
-            track.play()
             while (current === token) {
                 l.fill(0f); r.fill(0f)
                 // sleep timer: fade over the last 20 seconds, then finish
                 val end = stopAt
-                val targetMaster = if (end > 0) ((end - SystemClock.elapsedRealtime()) / 20_000f).coerceIn(0f, 1f) else 1f
+                val targetMaster = if (end > 0) ((end - clock()) / 20_000f).coerceIn(0f, 1f) else 1f
                 if (end > 0 && targetMaster <= 0f && master < 0.01f) break
                 var any = false
                 for (id in SoundId.entries) {
@@ -440,11 +429,10 @@ class SoundEngine {
                     out[2 * i] = (soft(l[i] * m) * 30000f).toInt().toShort()
                     out[2 * i + 1] = (soft(r[i] * m) * 30000f).toInt().toShort()
                 }
-                track.write(out, 0, out.size)
+                track.write(out, out.size)
             }
         } finally {
-            runCatching { track.stop() }
-            track.release()
+            runCatching { track.close() }
             val replaced = current != null && current !== token
             if (current === token) current = null
             if (!replaced) onFinished()

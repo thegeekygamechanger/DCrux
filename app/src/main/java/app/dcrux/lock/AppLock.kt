@@ -1,8 +1,6 @@
 package app.dcrux.lock
 
-import android.content.Context
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
+import app.dcrux.LocalGraph
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -41,13 +39,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
 import app.dcrux.ui.components.appBackground
-import app.dcrux.graph
 import app.dcrux.ui.components.AnimatedLogo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -55,28 +49,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 const val PIN_LENGTH = 4
-
-object AppLock {
-    fun canUseBiometrics(context: Context): Boolean =
-        BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
-
-    /** Biometrics first; "Use PIN" (or any failure) falls back to the PIN pad underneath. */
-    fun prompt(activity: FragmentActivity, onSuccess: () -> Unit) {
-        val prompt = BiometricPrompt(
-            activity, ContextCompat.getMainExecutor(activity),
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onSuccess()
-            },
-        )
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Unlock DCrux")
-            .setSubtitle("Fingerprint or face")
-            .setNegativeButtonText("Use PIN")
-            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
-            .build()
-        runCatching { prompt.authenticate(info) }
-    }
-}
 
 @Composable
 private fun PinDots(count: Int, shake: Float) {
@@ -121,8 +93,7 @@ private fun PinKey(onClick: () -> Unit, tonal: Boolean = true, content: @Composa
 /** Full-screen gate shown whenever the app is locked. */
 @Composable
 fun LockScreen(biometric: Boolean, onUnlocked: () -> Unit) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val scope = rememberCoroutineScope()
     var pin by remember { mutableStateOf("") }
     var fails by remember { mutableIntStateOf(0) }
@@ -130,11 +101,9 @@ fun LockScreen(biometric: Boolean, onUnlocked: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var checking by remember { mutableStateOf(false) }
     val shake = remember { Animatable(0f) }
-    val useBio = biometric && remember { AppLock.canUseBiometrics(context) }
+    val useBio = biometric && remember { g.platform.canUseBiometrics }
 
-    fun askBiometric() {
-        (context as? FragmentActivity)?.let { AppLock.prompt(it, onUnlocked) }
-    }
+    fun askBiometric() = g.platform.biometricPrompt(onUnlocked)
 
     LaunchedEffect(Unit) { if (useBio) askBiometric() }
     LaunchedEffect(blockedUntil) {
@@ -233,7 +202,7 @@ fun PinSetupDialog(onDone: (String) -> Unit, onDismiss: () -> Unit) {
 /** Asks for the current PIN before a sensitive change. */
 @Composable
 fun PinConfirmDialog(title: String, onConfirmed: () -> Unit, onDismiss: () -> Unit) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val scope = rememberCoroutineScope()
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }

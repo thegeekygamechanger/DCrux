@@ -1,5 +1,6 @@
 package app.dcrux.ui.news
 
+import app.dcrux.LocalGraph
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,7 +54,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,7 +64,6 @@ import app.dcrux.data.Dates
 import app.dcrux.data.NewsItem
 import app.dcrux.data.Settings
 import app.dcrux.data.Video
-import app.dcrux.graph
 import app.dcrux.net.Sources
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
@@ -88,7 +87,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchSheet(settings: Settings, onDismiss: () -> Unit) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current

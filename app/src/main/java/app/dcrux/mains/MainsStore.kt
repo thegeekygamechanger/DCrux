@@ -1,15 +1,5 @@
 package app.dcrux.mains
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Matrix
-import android.graphics.pdf.PdfRenderer
-import android.media.ExifInterface
-import android.net.Uri
-import android.os.ParcelFileDescriptor
-import androidx.core.content.FileProvider
 import app.dcrux.Graph
 import app.dcrux.ai.AiRepo
 import app.dcrux.ai.ClaudeException
@@ -35,7 +25,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 
 /** Where an evaluation has got to. [doneId] is set once the result is saved. */
@@ -61,8 +50,8 @@ class MainsStore(private val g: Graph) {
     /** True when the app was closed while the camera was open and the photo has just been recovered: go straight back to the attempt. */
     val resumeNow = MutableStateFlow(false)
 
-    private val dir: File get() = File(g.app.filesDir, "mains").apply { mkdirs() }
-    private val draftFile: File get() = File(g.app.filesDir, "mains_draft")
+    private val dir: File get() = File(g.platform.filesDir, "mains").apply { mkdirs() }
+    private val draftFile: File get() = File(g.platform.filesDir, "mains_draft")
     private val disk = Mutex()
     private var job: Job? = null
 
@@ -168,11 +157,11 @@ class MainsStore(private val g: Graph) {
     }
 
     /** Where the camera should write the next photo. Remembered on disk in case the app is closed meanwhile. */
-    fun newCapture(index: Int): Uri {
+    fun newCapture(index: Int): Any {
         val name = "cap_${System.currentTimeMillis()}.jpg"
         val f = File(dir, name).apply { createNewFile() }
         change { it.copy(pendingCapture = name, pendingFor = index) }
-        return FileProvider.getUriForFile(g.app, "${g.app.packageName}.capture", f)
+        return g.platform.pages.captureTarget(f)
     }
 
     suspend fun captureFinished() = withContext(Dispatchers.IO) {
@@ -191,24 +180,16 @@ class MainsStore(private val g: Graph) {
         }
     }
 
-    /** Turns a full-size camera file into a page of sensible size. Null when the camera wrote nothing. */
-    private fun adoptCapture(raw: File): String? {
-        if (!raw.exists()) return null
-        val name = if (raw.length() > 0) savePage(shrink { raw.inputStream() }) else null
-        raw.delete()
-        return name
-    }
+    private fun adoptCapture(raw: File): String? = g.platform.pages.adoptCapture(raw, dir)
 
-    /** Adds pictures or PDFs chosen from the phone. Returns how many pages were added. */
-    suspend fun importFiles(index: Int, uris: List<Uri>): Int = withContext(Dispatchers.IO) {
+    /** Adds pictures or PDFs chosen from the device. Returns how many pages were added. */
+    suspend fun importFiles(index: Int, sources: List<Any>): Int = withContext(Dispatchers.IO) {
         val d = draft.value ?: return@withContext 0
         var room = MAX_PAGES - d.pages[index].size
         val added = mutableListOf<String>()
-        for (uri in uris) {
+        for (source in sources) {
             if (room <= 0) break
-            val type = g.app.contentResolver.getType(uri).orEmpty()
-            val names = if (type == "application/pdf" || uri.toString().lowercase().endsWith(".pdf")) pdfPages(uri, room)
-            else listOfNotNull(savePage(shrink { g.app.contentResolver.openInputStream(uri) }))
+            val names = runCatching { g.platform.pages.importPages(source, dir, room) }.getOrDefault(emptyList())
             added += names
             room -= names.size
         }
@@ -220,64 +201,6 @@ class MainsStore(private val g: Graph) {
             ) }
         }
         added.size
-    }
-
-    private fun pdfPages(uri: Uri, limit: Int): List<String> {
-        // PdfRenderer needs a seekable file, which not every document provider gives; copy it first.
-        val tmp = File(dir, "import_${System.nanoTime()}.pdf")
-        return try {
-            g.app.contentResolver.openInputStream(uri)?.use { input -> tmp.outputStream().use { input.copyTo(it) } } ?: return emptyList()
-            ParcelFileDescriptor.open(tmp, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-                PdfRenderer(fd).use { pdf ->
-                    (0 until minOf(pdf.pageCount, limit)).mapNotNull { i ->
-                        pdf.openPage(i).use { page ->
-                            val scale = MAX_EDGE.toFloat() / maxOf(page.width, page.height)
-                            val bmp = Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-                            Canvas(bmp).drawColor(Color.WHITE)
-                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            savePage(bmp)
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            emptyList()
-        } finally {
-            tmp.delete()
-        }
-    }
-
-    /** Decodes a picture no larger than needed, upright, with its long edge at [MAX_EDGE] or less. */
-    private fun shrink(open: () -> InputStream?): Bitmap? = runCatching {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        open()?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
-        var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_EDGE) sample *= 2
-        val bmp = open()?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) } ?: return@runCatching null
-        val turn = runCatching {
-            open()?.use {
-                when (ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
-                    ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                    ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                    ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                    else -> 0f
-                }
-            }
-        }.getOrNull() ?: 0f
-        val scale = minOf(1f, MAX_EDGE.toFloat() / maxOf(bmp.width, bmp.height))
-        if (turn == 0f && scale == 1f) bmp
-        else Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postScale(scale, scale); postRotate(turn) }, true)
-    }.getOrNull()
-
-    private fun savePage(bmp: Bitmap?): String? {
-        bmp ?: return null
-        val name = "p_${System.nanoTime()}.jpg"
-        return runCatching {
-            File(dir, name).outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 80, it) }
-            bmp.recycle()
-            name
-        }.getOrNull()
     }
 
     fun clearProgress() { progress.value = null }

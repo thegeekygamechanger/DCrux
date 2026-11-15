@@ -67,7 +67,7 @@ class AiRepo(private val g: Graph) {
      * rate-limited or overloaded. Manual: only the model picked in Settings.
      */
     private suspend fun <T> withModel(block: suspend (String, ModelInfo) -> T): T {
-        AiWork.begin(g.app)
+        g.platform.aiWorkBegin()
         try {
             var attempt = 0
             while (true) {
@@ -81,7 +81,7 @@ class AiRepo(private val g: Graph) {
                 }
             }
         } finally {
-            AiWork.end(g.app)
+            g.platform.aiWorkEnd()
         }
     }
 
@@ -636,7 +636,7 @@ class AiRepo(private val g: Graph) {
             // Timings for the debug build only: where an answer's wait is spent.
             val t0 = System.currentTimeMillis()
             var firstAt = 0L
-            fun mark(what: String) { if (app.dcrux.BuildConfig.DEBUG) android.util.Log.d("DCruxAsk", "$what at ${System.currentTimeMillis() - t0} ms") }
+            fun mark(what: String) { if (DEBUG_TIMINGS) println("DCruxAsk: $what at ${System.currentTimeMillis() - t0} ms") }
             try {
                 val s = g.prefs.get()
                 val material = materialOf(topic)
@@ -798,6 +798,9 @@ class AiRepo(private val g: Graph) {
 
         const val MAINS_EVAL_SCHEMA =
             """{"type":"object","properties":{"transcript":{"type":"string"},"legibility":{"type":"integer"},"word_count":{"type":"integer"},"is_answer":{"type":"boolean"},"problem":{"type":"string"},"breakdown":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"score":{"type":"number"},"comment":{"type":"string"}},"required":["criterion","score","comment"],"additionalProperties":false}},"verdict":{"type":"string"},"strengths":$STRS,"improvements":$STRS,"missing":$STRS,"errors":{"type":"array","items":{"type":"object","properties":{"written":{"type":"string"},"issue":{"type":"string"}},"required":["written","issue"],"additionalProperties":false}},"structure":{"type":"string"},"outline":$STRS,"exam_tips":$STRS,"time_advice":{"type":"string"},"marked":{"type":"array","items":{"type":"object","properties":{"page":{"type":"integer"},"section":{"type":"string"},"text":{"type":"string"},"mark":{"type":"string","enum":["good","partial","wrong","weak"]},"remark":{"type":"string"}},"required":["page","section","text","mark","remark"],"additionalProperties":false}}},"required":["transcript","legibility","word_count","is_answer","problem","breakdown","verdict","strengths","improvements","missing","errors","structure","outline","exam_tips","time_advice","marked"],"additionalProperties":false}"""
+
+        /** Set to true while measuring where an answer's wait is spent; prints timings to the log. */
+        const val DEBUG_TIMINGS = false
 
         /** Stands in the prompt for the instruction on what to do when the material does not hold the answer. */
         private const val STEP3 = "[[step-3]]\n"

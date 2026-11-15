@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.update
 
 /** What the Mind Flow screen shows and changes. One instance for the whole app. */
 object MindFlow {
-    val engine = SoundEngine()
+    val engine = SoundEngine({ rate, frames -> AndroidAudioSink(rate, frames) }, SystemClock::elapsedRealtime)
     val levels = MutableStateFlow<Map<SoundId, Float>>(emptyMap())
     val paused = MutableStateFlow(false)
 

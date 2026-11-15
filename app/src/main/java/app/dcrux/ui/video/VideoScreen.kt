@@ -1,7 +1,6 @@
 package app.dcrux.ui.video
 
-import android.content.Intent
-import android.net.Uri
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -55,13 +54,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.dcrux.ui.components.appBackground
-import app.dcrux.ai.AiWork
 import app.dcrux.data.Dates
 import app.dcrux.data.Settings
-import app.dcrux.graph
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import app.dcrux.ui.ScreenBar
@@ -78,8 +74,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 fun VideoScreen(videoId: String, settings: Settings) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val video by remember(videoId) { g.db.videos().observe(videoId) }.collectAsState(initial = null)
@@ -116,7 +111,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
             if (captions == null && !fromDescription) {
                 grabbing = true
                 controller.busy = true
-                AiWork.begin(context.applicationContext)
+                g.platform.aiWorkBegin()
                 try {
                 // Give the player a moment to come up, then let it load its caption track.
                 withTimeoutOrNull(9_000) { snapshotFlow { playerReady || playerError != null }.first { it } }
@@ -140,7 +135,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                     if (controller.busy && captions == null) runCatching { controller.doneCaptions(restore = !userPlayed) }
                     grabbing = false
                     controller.busy = false
-                    AiWork.end(context.applicationContext)
+                    g.platform.aiWorkEnd()
                 }
                 if (captions != null) return@launch
             }
@@ -183,7 +178,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                 })
             }
             IconButton(onClick = {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))) }
+                g.platform.openUrl("https://www.youtube.com/watch?v=$videoId")
             }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Open in YouTube") }
         }
 

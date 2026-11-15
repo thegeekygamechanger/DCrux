@@ -1,11 +1,7 @@
 package app.dcrux.ui.settings
 
-import android.app.Activity
-import android.content.ClipboardManager
-import android.content.Context
-import android.os.Build
-import android.webkit.CookieManager
-import android.webkit.WebStorage
+import app.dcrux.data.wipe
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -86,25 +82,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
-import app.dcrux.BuildConfig
 import app.dcrux.data.Dates
 import androidx.compose.ui.unit.dp
 import app.dcrux.ui.components.appBackground
 import app.dcrux.ai.ClaudeException
-import app.dcrux.audio.MindFlow
 import app.dcrux.data.CustomSource
 import app.dcrux.data.ExamCatalog
 import app.dcrux.data.Settings
-import app.dcrux.graph
-import app.dcrux.lock.AppLock
 import app.dcrux.lock.PinConfirmDialog
 import app.dcrux.lock.PinSetupDialog
 import app.dcrux.net.Sources
-import app.dcrux.sync.SyncManager
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import app.dcrux.ui.ScreenBar
@@ -172,8 +162,7 @@ private fun Label(text: String) {
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val dark = isDark(settings.themeMode)
@@ -242,15 +231,14 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
 
     fun resetApp() {
         scope.launch {
-            MindFlow.stopAll(context)
+            g.platform.sounds.stopAll()
             g.mains.discard()
-            withContext(Dispatchers.IO) { g.db.clearAllTables() }
+            g.db.wipe()
             g.prefs.wipe()
             g.secure.wipe()
-            CookieManager.getInstance().removeAllCookies(null)
-            WebStorage.getInstance().deleteAllData()
-            SyncManager.schedule(context, enabled = true, wifiOnly = false)
-            (context as? Activity)?.recreate()
+            g.platform.clearWebData()
+            g.platform.scheduleDailySync(enabled = true, wifiOnly = false)
+            g.platform.restart()
         }
     }
 
@@ -274,8 +262,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                                 leadingIcon = { Icon(Icons.Rounded.Link, null) },
                                 trailingIcon = {
                                     IconButton(onClick = {
-                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.let { linkText = it }
+                                        g.platform.clipboardText()?.let { linkText = it }
                                     }) { Icon(Icons.Rounded.ContentPaste, "Paste") }
                                 },
                             )
@@ -480,10 +467,10 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             item("sync") {
                 Section("Sync", Icons.Rounded.Sync, (if (settings.dailySync) "Daily" else "Manual") + " · last synced " + Dates.ago(settings.lastSync), openSection == "sync", { openSection = if (openSection == "sync") "" else "sync" }) {
                     SwitchRow("Daily auto-sync", "Every morning, in the background", settings.dailySync) {
-                        scope.launch { g.prefs.setDailySync(it); SyncManager.schedule(context, it, settings.wifiOnly) }
+                        scope.launch { g.prefs.setDailySync(it); g.platform.scheduleDailySync(it, settings.wifiOnly) }
                     }
                     SwitchRow("Only on Wi-Fi", null, settings.wifiOnly, enabled = settings.dailySync) {
-                        scope.launch { g.prefs.setWifiOnly(it); SyncManager.schedule(context, settings.dailySync, it) }
+                        scope.launch { g.prefs.setWifiOnly(it); g.platform.scheduleDailySync(settings.dailySync, it) }
                     }
                     SwitchRow("Show Shorts", null, settings.showShorts) { scope.launch { g.prefs.setShowShorts(it) } }
                     Label("Items per page")
@@ -503,7 +490,8 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                     SwitchRow("Follow system", null, settings.themeMode == "system") {
                         scope.launch { g.prefs.setTheme(if (it) "system" else if (dark) "dark" else "light") }
                     }
-                    SwitchRow("Wallpaper colours", if (Build.VERSION.SDK_INT >= 31) "Use Material You colours from your wallpaper" else "Needs Android 12 or newer", settings.dynamicColor, enabled = Build.VERSION.SDK_INT >= 31) {
+                    val canDynamic = remember { g.platform.dynamicColors(false) != null }
+                    SwitchRow("Wallpaper colours", if (canDynamic) "Use Material You colours from your wallpaper" else if (g.platform.isDesktop) "Not available on a computer" else "Needs Android 12 or newer", settings.dynamicColor, enabled = canDynamic) {
                         scope.launch { g.prefs.setDynamic(it) }
                     }
                 }
@@ -516,8 +504,8 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                     }
                     SwitchRow(
                         "Unlock with biometrics",
-                        if (AppLock.canUseBiometrics(context)) "Fingerprint or face" else "No fingerprint or face is set up on this phone",
-                        settings.biometric && settings.lockEnabled, enabled = settings.lockEnabled && AppLock.canUseBiometrics(context),
+                        if (g.platform.canUseBiometrics) "Fingerprint or face" else "No fingerprint or face is set up on this phone",
+                        settings.biometric && settings.lockEnabled, enabled = settings.lockEnabled && g.platform.canUseBiometrics,
                     ) { scope.launch { g.prefs.setBiometric(it) } }
                     if (settings.lockEnabled) {
                         Row(Modifier.fillMaxWidth().clickable { pinConfirmFor = "change" }.padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -531,7 +519,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
             }
 
             item("update") {
-                Section("App update", Icons.Rounded.SystemUpdate, "Version " + BuildConfig.VERSION_NAME, openSection == "update", { openSection = if (openSection == "update") "" else "update" }) {
+                Section("App update", Icons.Rounded.SystemUpdate, "Version " + g.platform.versionName, openSection == "update", { openSection = if (openSection == "update") "" else "update" }) {
                     UpdatePanel(Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
                     SwitchRow("Check for updates automatically", "Once a day, from GitHub", settings.autoUpdate) { scope.launch { g.prefs.setAutoUpdate(it) } }
                 }

@@ -1,7 +1,7 @@
 package app.dcrux.ui.home
 
-import android.content.Intent
-import android.net.Uri
+import app.dcrux.Host
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
@@ -94,16 +94,13 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.dcrux.MainActivity
 import app.dcrux.data.Channel
 import app.dcrux.data.Dates
 import app.dcrux.data.Quotes
 import app.dcrux.data.Settings
 import app.dcrux.data.Video
-import app.dcrux.graph
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import app.dcrux.ui.components.bottomBarInset
@@ -123,9 +120,8 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun HomeTab(settings: Settings, activity: MainActivity) {
-    val context = LocalContext.current
-    val g = context.graph
+fun HomeTab(settings: Settings, host: Host) {
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val sync by g.sync.state.collectAsState()
@@ -142,9 +138,9 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
     )
 
     // A link shared from the YouTube app lands here and is synced straight away.
-    LaunchedEffect(activity.sharedText.value) {
-        activity.sharedText.value?.let { shared ->
-            activity.sharedText.value = null
+    LaunchedEffect(host.sharedText.value) {
+        host.sharedText.value?.let { shared ->
+            host.sharedText.value = null
             shareMessage = "Adding the shared link"
             val report = g.sync.addLinks(shared)
             shareMessage = when {
@@ -360,8 +356,7 @@ private fun TodayCard(settings: Settings, onOpen: () -> Unit) {
 
 @Composable
 private fun ChannelCard(channel: Channel, settings: Settings, startExpanded: Boolean) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     var expanded by rememberSaveable(channel.id) { mutableStateOf(startExpanded) }
@@ -405,7 +400,7 @@ private fun ChannelCard(channel: Channel, settings: Settings, startExpanded: Boo
                             text = { Text("Open on YouTube") }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
                             onClick = {
                                 menu = false
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/channel/${channel.id}"))) }
+                                g.platform.openUrl("https://www.youtube.com/channel/${channel.id}")
                             },
                         )
                         DropdownMenuItem(

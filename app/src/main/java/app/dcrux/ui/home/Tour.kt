@@ -1,6 +1,7 @@
 package app.dcrux.ui.home
 
-import androidx.activity.compose.BackHandler
+import app.dcrux.ui.OnBack
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -57,10 +58,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import app.dcrux.graph
 import kotlinx.coroutines.launch
 
 private data class Step(val title: String, val body: String, val icon: ImageVector?, val tab: Int)
@@ -75,11 +74,11 @@ private val steps = listOf(
 /** A short walk through the app, shown once. It sits over the real screens so each tip points at the real thing. */
 @Composable
 fun Tour(onTab: (Int) -> Unit) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val scope = rememberCoroutineScope()
     var index by rememberSaveable { mutableIntStateOf(0) }
     fun finish() { onTab(0); scope.launch { g.prefs.setTourDone(true) } }
-    BackHandler { finish() }
+    OnBack { finish() }
 
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f))

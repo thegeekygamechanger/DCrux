@@ -1,19 +1,17 @@
 package app.dcrux.data
 
-import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
-
-private val Context.store by preferencesDataStore("dcrux_settings")
 
 val AppJson = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
 
@@ -49,7 +47,7 @@ data class Settings(
     val weather: Weather? = null,
 )
 
-class Prefs(private val context: Context) {
+class Prefs(private val store: DataStore<Preferences>) {
     private object K {
         val theme = stringPreferencesKey("theme")
         val dynamic = booleanPreferencesKey("dynamic")
@@ -81,7 +79,7 @@ class Prefs(private val context: Context) {
         val weather = stringPreferencesKey("weather")
     }
 
-    val flow: Flow<Settings> = context.store.data.map { p ->
+    val flow: Flow<Settings> = store.data.map { p ->
         val d = Settings()
         Settings(
             themeMode = p[K.theme] ?: d.themeMode,
@@ -118,7 +116,7 @@ class Prefs(private val context: Context) {
     suspend fun get(): Settings = flow.first()
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
-        context.store.edit { block(it) }
+        store.edit { block(it) }
     }
 
     suspend fun setTheme(v: String) = edit { it[K.theme] = v }
@@ -151,7 +149,7 @@ class Prefs(private val context: Context) {
     suspend fun setReaderScale(v: Float) = edit { it[K.readerScale] = (v * 100).toInt() }
 
     suspend fun wipe() {
-        context.store.edit { it.clear() }
+        store.edit { it.clear() }
     }
 }
 

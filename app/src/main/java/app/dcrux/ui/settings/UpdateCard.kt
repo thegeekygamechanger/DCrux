@@ -1,8 +1,6 @@
 package app.dcrux.ui.settings
 
-import android.content.Intent
-import android.net.Uri
-import android.provider.Settings
+import app.dcrux.LocalGraph
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,11 +28,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.dcrux.BuildConfig
-import app.dcrux.graph
 import app.dcrux.update.UpdateInfo
 import app.dcrux.update.UpdateState
 import kotlinx.coroutines.launch
@@ -49,8 +44,7 @@ private fun mb(bytes: Long) = if (bytes > 0) " · %.1f MB".format(bytes / 1_048_
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun UpdatePanel(modifier: Modifier = Modifier, banner: Boolean = false) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val scope = rememberCoroutineScope()
     val state by g.updates.state.collectAsState()
     val info: UpdateInfo? = when (val s = state) {
@@ -69,16 +63,16 @@ fun UpdatePanel(modifier: Modifier = Modifier, banner: Boolean = false) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (info != null) "DCrux ${info.version} is available" else "DCrux ${BuildConfig.VERSION_NAME}",
+                    if (info != null) "DCrux ${info.version} is available" else "DCrux ${g.platform.versionName}",
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
                     when (val s = state) {
                         UpdateState.Checking -> "Checking GitHub for a newer version"
                         UpdateState.UpToDate -> "You have the latest version"
-                        is UpdateState.Available -> "You have ${BuildConfig.VERSION_NAME}${mb(s.info.sizeBytes)}"
+                        is UpdateState.Available -> "You have ${g.platform.versionName}${mb(s.info.sizeBytes)}"
                         is UpdateState.Downloading -> "Downloading · ${s.percent}%"
-                        is UpdateState.Confirming -> "Confirm the update in Android's prompt"
+                        is UpdateState.Confirming -> if (g.platform.isDesktop) "The download page is open in your browser" else "Confirm the update in Android's prompt"
                         is UpdateState.NeedsPermission -> "One-time step: allow DCrux to install its own updates, then come back. The update continues by itself."
                         is UpdateState.Failed -> s.message
                         UpdateState.Idle -> "Updates come from the project's GitHub releases"
@@ -102,13 +96,7 @@ fun UpdatePanel(modifier: Modifier = Modifier, banner: Boolean = false) {
             when (val s = state) {
                 is UpdateState.Available -> Button(onClick = { g.updates.install(s.info) }) { Text("Update now") }
                 is UpdateState.Confirming -> FilledTonalButton(onClick = { g.updates.install(s.info) }) { Text("Show the prompt again") }
-                is UpdateState.NeedsPermission -> Button(onClick = {
-                    runCatching {
-                        context.startActivity(
-                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    }
-                }) { Text("Allow") }
+                is UpdateState.NeedsPermission -> Button(onClick = { g.platform.openInstallPermission() }) { Text("Allow") }
                 is UpdateState.Failed -> if (s.info != null) Button(onClick = { g.updates.install(s.info) }) { Text("Try again") }
                 else FilledTonalButton(onClick = { scope.launch { g.updates.check(force = true) } }) { Text("Check again") }
                 is UpdateState.Downloading, UpdateState.Checking -> {}

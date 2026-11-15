@@ -1,26 +1,10 @@
 package app.dcrux.net
 
-import android.Manifest
-import android.annotation.SuppressLint
-import android.content.Context
-import android.content.pm.PackageManager
-import android.location.Geocoder
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Build
-import android.os.Bundle
-import android.os.Looper
-import androidx.core.content.ContextCompat
 import app.dcrux.data.AppJson
 import app.dcrux.data.Place
 import app.dcrux.data.Weather
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -28,8 +12,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URLEncoder
-import java.util.Locale
-import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
 /** Something worth knowing before stepping out, worked out from the day's forecast. */
@@ -40,60 +22,21 @@ data class Advisory(val title: String, val body: String, val severe: Boolean = f
  * Only a city-level position is ever used: coordinates are rounded to about a kilometre
  * before they are stored or sent anywhere.
  */
-class WeatherRepo(private val context: Context, private val service: app.dcrux.ai.ClaudeClient? = null) {
+class WeatherRepo(private val platform: app.dcrux.Platform, private val service: app.dcrux.ai.ClaudeClient? = null) {
     private val headers = mapOf("User-Agent" to Http.APP_UA)
 
     private fun round2(v: Double) = (v * 100).roundToInt() / 100.0
 
-    fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    fun hasLocationPermission(): Boolean = platform.hasLocationPermission()
 
-    /** The phone's approximate position turned into a city. Null when the phone cannot say where it is. */
+    /** The device's approximate position turned into a city. Null when the device cannot say where it is. */
     suspend fun locate(): Place? {
         if (!hasLocationPermission()) return null
-        val loc = position() ?: return null
-        val lat = round2(loc.latitude)
-        val lon = round2(loc.longitude)
-        val named = cityFromGeocoder(lat, lon) ?: cityFromWeb(lat, lon)
+        val (rawLat, rawLon) = platform.position() ?: return null
+        val lat = round2(rawLat)
+        val lon = round2(rawLon)
+        val named = platform.cityName(lat, lon) ?: cityFromWeb(lat, lon)
         return Place(named?.first ?: "My location", lat, lon, named?.second.orEmpty())
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun position(): Location? {
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-        val providers = runCatching { lm.getProviders(true) }.getOrDefault(emptyList())
-        val last = providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
-        // A fix from the last day is plenty for "which city".
-        if (last != null && System.currentTimeMillis() - last.time < 24 * 3_600_000L) return last
-        val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.PASSIVE_PROVIDER).firstOrNull { it in providers }
-            ?: return last
-        val fresh = withTimeoutOrNull(15_000) {
-            suspendCancellableCoroutine<Location?> { cont ->
-                val listener = object : LocationListener {
-                    override fun onLocationChanged(location: Location) {
-                        runCatching { lm.removeUpdates(this) }
-                        if (cont.isActive) cont.resume(location)
-                    }
-                    @Deprecated("Deprecated in Java") override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-                    override fun onProviderEnabled(provider: String) {}
-                    override fun onProviderDisabled(provider: String) {}
-                }
-                runCatching { lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper()) }
-                    .onFailure { if (cont.isActive) cont.resume(null) }
-                cont.invokeOnCancellation { runCatching { lm.removeUpdates(listener) } }
-            }
-        }
-        return fresh ?: last
-    }
-
-    @Suppress("DEPRECATION")
-    private suspend fun cityFromGeocoder(lat: Double, lon: Double): Pair<String, String>? = withContext(Dispatchers.IO) {
-        if (!Geocoder.isPresent()) return@withContext null
-        runCatching {
-            val a = Geocoder(context, Locale.ENGLISH).getFromLocation(lat, lon, 1)?.firstOrNull() ?: return@runCatching null
-            val city = a.locality ?: a.subAdminArea ?: a.adminArea ?: return@runCatching null
-            city to a.adminArea.orEmpty()
-        }.getOrNull()
     }
 
     /** For phones without a built-in geocoder. */

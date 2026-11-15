@@ -1,5 +1,6 @@
 package app.dcrux.ui.components
 
+import app.dcrux.LocalGraph
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -33,11 +34,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.dcrux.graph
 import app.dcrux.net.OpenImage
 import app.dcrux.ui.theme.Heros
 import coil3.compose.AsyncImage
@@ -54,7 +53,7 @@ data class Slide(val text: String, val caption: String, val query: String, val s
 @Composable
 fun PhotoCarousel(label: String, icon: ImageVector, slides: List<Slide>, daySeed: Int, modifier: Modifier = Modifier) {
     if (slides.isEmpty()) return
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val pager = rememberPagerState { slides.size }
     LaunchedEffect(pager) {
         while (true) {

@@ -1,8 +1,7 @@
 package app.dcrux.ui
 
-import androidx.activity.SystemBarStyle
-import androidx.activity.compose.BackHandler
-import androidx.activity.enableEdgeToEdge
+import app.dcrux.LocalGraph
+import app.dcrux.Host
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -62,11 +61,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
-import app.dcrux.MainActivity
 import app.dcrux.data.Settings
-import app.dcrux.graph
 import app.dcrux.lock.LockScreen
 import app.dcrux.ui.home.HomeTab
 import app.dcrux.ui.mind.MindFlowTab
@@ -88,44 +84,42 @@ import app.dcrux.ui.theme.isDark
 import app.dcrux.ui.video.VideoScreen
 
 @Composable
-fun DCruxRoot(activity: MainActivity) {
-    val g = activity.graph
+fun DCruxRoot(host: Host) {
+    val g = host.graph
     val loaded by g.prefs.flow.collectAsState(initial = null)
     val settings = loaded ?: return
     val nav = remember { Nav() }
 
+    CompositionLocalProvider(LocalGraph provides g) {
     DCruxTheme(settings.themeMode, settings.dynamicColor) {
         val dark = isDark(settings.themeMode)
         DisposableEffect(dark) {
-            val t = Color.Transparent.toArgb()
-            activity.enableEdgeToEdge(
-                statusBarStyle = if (dark) SystemBarStyle.dark(t) else SystemBarStyle.light(t, t),
-                navigationBarStyle = if (dark) SystemBarStyle.dark(t) else SystemBarStyle.light(t, t),
-            )
+            host.systemBars(dark)
             onDispose { }
         }
         CompositionLocalProvider(LocalNav provides nav) {
             // A Surface (not a plain background) so text everywhere defaults to the theme's on-surface colour.
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface) {
                 AnimatedContent(
-                    activity.locked.value,
+                    host.locked.value,
                     transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.96f)) togetherWith (fadeOut() + scaleOut(targetScale = 1.04f)) },
                     label = "lock",
                 ) { locked ->
-                    if (locked) LockScreen(settings.biometric) { activity.locked.value = false }
-                    else AppNav(nav, settings, activity)
+                    if (locked) LockScreen(settings.biometric) { host.locked.value = false }
+                    else AppNav(nav, settings, host)
                 }
             }
         }
     }
+    }
 }
 
 @Composable
-private fun AppNav(nav: Nav, settings: Settings, activity: MainActivity) {
+private fun AppNav(nav: Nav, settings: Settings, host: Host) {
     val holder = rememberSaveableStateHolder()
-    BackHandler(enabled = nav.stack.size > 1) { nav.pop() }
+    OnBack(enabled = nav.stack.size > 1) { nav.pop() }
     if (nav.searchOpen) SearchSheet(settings) { nav.searchOpen = false }
-    val g = activity.graph
+    val g = host.graph
     val resumeMains by g.mains.resumeNow.collectAsState()
     LaunchedEffect(resumeMains) {
         if (resumeMains) {
@@ -144,7 +138,7 @@ private fun AppNav(nav: Nav, settings: Settings, activity: MainActivity) {
     ) { (depth, screen) ->
         holder.SaveableStateProvider("$depth:${screen.hashCode()}") {
             when (screen) {
-                Screen.Tabs -> TabsScreen(nav, settings, activity)
+                Screen.Tabs -> TabsScreen(nav, settings, host)
                 is Screen.VideoDetail -> VideoScreen(screen.id, settings)
                 is Screen.Reader -> ReaderScreen(screen, settings)
                 is Screen.Browser -> BrowserScreen(screen.url, screen.title, settings)
@@ -170,7 +164,7 @@ private val tabs = listOf(
 )
 
 @Composable
-private fun TabsScreen(nav: Nav, settings: Settings, activity: MainActivity) {
+private fun TabsScreen(nav: Nav, settings: Settings, host: Host) {
     val holder = rememberSaveableStateHolder()
     // No bar area: the tab fills the whole screen and the pill floats over it, so nothing
     // is cut off above the bar and there is no band of background behind it.
@@ -181,7 +175,7 @@ private fun TabsScreen(nav: Nav, settings: Settings, activity: MainActivity) {
         ) { tab ->
             holder.SaveableStateProvider("tab$tab") {
                 when (tab) {
-                    0 -> HomeTab(settings, activity)
+                    0 -> HomeTab(settings, host)
                     1 -> NewsTab(settings)
                     2 -> TestsTab(settings)
                     3 -> MindFlowTab()

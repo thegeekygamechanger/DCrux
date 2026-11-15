@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "DCrux"
 include(":app")
+include(":desktop")

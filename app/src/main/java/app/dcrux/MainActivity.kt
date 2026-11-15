@@ -11,12 +11,12 @@ import androidx.lifecycle.lifecycleScope
 import app.dcrux.ui.DCruxRoot
 import kotlinx.coroutines.launch
 
-class MainActivity : FragmentActivity() {
+class MainActivity : FragmentActivity(), Host {
     /** True while the lock screen must cover the app. */
-    val locked = mutableStateOf(false)
+    override val locked = mutableStateOf(false)
 
     /** Text shared into the app from another app (a YouTube link). */
-    val sharedText = mutableStateOf<String?>(null)
+    override val sharedText = mutableStateOf<String?>(null)
 
     private var stoppedAt = 0L
 
@@ -31,6 +31,7 @@ class MainActivity : FragmentActivity() {
             ready = true
         }
         readShare(intent)
+        (application as DCruxApp).platform.activity = java.lang.ref.WeakReference(this)
         setContent { DCruxRoot(this) }
     }
 
@@ -45,6 +46,16 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    override val graph: Graph get() = (application as DCruxApp).graph
+
+    override fun systemBars(dark: Boolean) {
+        val t = android.graphics.Color.TRANSPARENT
+        enableEdgeToEdge(
+            statusBarStyle = if (dark) androidx.activity.SystemBarStyle.dark(t) else androidx.activity.SystemBarStyle.light(t, t),
+            navigationBarStyle = if (dark) androidx.activity.SystemBarStyle.dark(t) else androidx.activity.SystemBarStyle.light(t, t),
+        )
+    }
+
     override fun onStop() {
         super.onStop()
         stoppedAt = System.currentTimeMillis()
@@ -52,6 +63,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        (application as DCruxApp).platform.activity = java.lang.ref.WeakReference(this)
         graph.updates.onAppForeground()
         // Re-lock after the app has been in the background for a short while.
         if (stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 20_000) {

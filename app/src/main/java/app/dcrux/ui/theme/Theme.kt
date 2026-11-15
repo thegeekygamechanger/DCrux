@@ -1,6 +1,6 @@
 package app.dcrux.ui.theme
 
-import android.os.Build
+import app.dcrux.LocalGraph
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -12,8 +12,6 @@ import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -21,31 +19,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import app.dcrux.R
-
-/**
- * Headlines use TeX Gyre Heros, the freely licensed Helvetica-metric typeface
- * (Helvetica itself is proprietary and cannot be bundled); everything else is Inter.
- */
-val Heros = FontFamily(
-    Font(R.font.heros_regular, FontWeight.Normal),
-    Font(R.font.heros_bold, FontWeight.Bold),
-)
-
-val Inter = FontFamily(
-    Font(R.font.inter_regular, FontWeight.Normal),
-    Font(R.font.inter_medium, FontWeight.Medium),
-    Font(R.font.inter_semibold, FontWeight.SemiBold),
-    Font(R.font.inter_bold, FontWeight.Bold),
-)
 
 private fun heros(size: Int, line: Int, weight: FontWeight = FontWeight.Bold, spacing: Double = -0.02) =
     TextStyle(fontFamily = Heros, fontWeight = weight, fontSize = size.sp, lineHeight = line.sp, letterSpacing = spacing.em)
@@ -155,12 +134,8 @@ fun isDark(mode: String): Boolean = when (mode) {
 @Composable
 fun DCruxTheme(mode: String, dynamic: Boolean, content: @Composable () -> Unit) {
     val dark = isDark(mode)
-    val context = LocalContext.current
-    val scheme = when {
-        dynamic && Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> Dark
-        else -> Light
-    }
+    val platform = LocalGraph.current.platform
+    val scheme = (if (dynamic) platform.dynamicColors(dark) else null) ?: if (dark) Dark else Light
     val extra = if (dark) {
         Extra(Color(0xFF0F5132), Color(0xFFBDF3D0), Color(0xFF5C4300), Color(0xFFFFE3A6), Color(0xFF35343A), Color(0xFFCAC4CF), Color(0xFFFFC94D), true)
     } else {

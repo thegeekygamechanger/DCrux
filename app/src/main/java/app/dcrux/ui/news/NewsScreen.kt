@@ -1,5 +1,6 @@
 package app.dcrux.ui.news
 
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
@@ -69,7 +70,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,7 +77,6 @@ import androidx.compose.ui.unit.dp
 import app.dcrux.data.Dates
 import app.dcrux.data.NewsItem
 import app.dcrux.data.Settings
-import app.dcrux.graph
 import app.dcrux.net.EPapers
 import app.dcrux.net.NewsSource
 import app.dcrux.net.Sources
@@ -100,8 +99,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NewsTab(settings: Settings) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val sources = remember(settings.enabledSources, settings.customSources) { Sources.enabled(settings) }
@@ -163,8 +161,7 @@ fun NewsTab(settings: Settings) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ColumnScope.PaperView(sources: List<NewsSource>, source: NewsSource, settings: Settings) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val scope = rememberCoroutineScope()
     val days by remember(source.id) { g.db.news().days(source.id) }.collectAsState(initial = null)
     var pickedDay by rememberSaveable(source.id) { mutableStateOf<String?>(null) }
@@ -268,7 +265,7 @@ private fun ColumnScope.PaperView(sources: List<NewsSource>, source: NewsSource,
 @Composable
 private fun PaperSheet(source: NewsSource, day: String, page: Int, pageCount: Int, items: List<NewsItem>, onPage: (Int) -> Unit) {
     val nav = LocalNav.current
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     var askAbout by remember { mutableStateOf<NewsItem?>(null) }
     askAbout?.let { item -> AskSheet(item, source.name) { askAbout = null } }
     val dark = LocalExtra.current.dark

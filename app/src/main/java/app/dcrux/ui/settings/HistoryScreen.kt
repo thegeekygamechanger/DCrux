@@ -1,5 +1,6 @@
 package app.dcrux.ui.settings
 
+import app.dcrux.LocalGraph
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -47,14 +48,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.dcrux.data.Ask
 import app.dcrux.data.Dates
 import app.dcrux.data.Settings
 import app.dcrux.data.TestResult
-import app.dcrux.graph
 import app.dcrux.mains.MainsStore
 import app.dcrux.net.Sources
 import app.dcrux.ui.LocalNav
@@ -86,7 +85,7 @@ private val filters = listOf("All", "Videos", "Articles", "Prelims", "Mains")
  */
 @Composable
 fun HistoryScreen(settings: Settings) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val asks by remember { g.db.asks().observeAll() }.collectAsState(initial = emptyList())

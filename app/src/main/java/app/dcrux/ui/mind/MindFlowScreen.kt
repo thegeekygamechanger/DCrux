@@ -1,11 +1,6 @@
 package app.dcrux.ui.mind
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.SystemClock
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -74,10 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import app.dcrux.audio.MindFlow
 import app.dcrux.audio.SoundId
 import app.dcrux.data.Dates
 import app.dcrux.ui.components.bottomBarInset
@@ -135,20 +127,14 @@ private val presets = listOf(
 
 @Composable
 fun MindFlowTab() {
-    val context = LocalContext.current
-    val levels by MindFlow.levels.collectAsState()
-    val timerEnd by MindFlow.timerEnd.collectAsState()
-    val paused by MindFlow.paused.collectAsState()
-    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    LaunchedEffect(timerEnd) { while (timerEnd > 0) { now = SystemClock.elapsedRealtime(); delay(1000) } }
-
-    // Android 13+: the "now playing" notification needs permission; playback works either way.
-    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    fun ensureNotifications() {
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
+    val g = LocalGraph.current
+    val sounds = g.platform.sounds
+    val levels by sounds.levels.collectAsState()
+    val timerEnd by sounds.timerEnd.collectAsState()
+    val paused by sounds.paused.collectAsState()
+    var now by remember { mutableLongStateOf(g.platform.uptime()) }
+    LaunchedEffect(timerEnd) { while (timerEnd > 0) { now = g.platform.uptime(); delay(1000) } }
+    val ensureNotifications = g.platform.rememberNotificationAsk()
 
     LazyVerticalGrid(
         GridCells.Fixed(2), Modifier.fillMaxSize().statusBarsPadding(),
@@ -173,12 +159,12 @@ fun MindFlowTab() {
         item(span = { GridItemSpan(2) }) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 presets.forEach { (name, mix) ->
-                    AssistChip(onClick = { ensureNotifications(); MindFlow.setMix(context, mix) }, label = { Text(name) }, shape = CircleShape)
+                    AssistChip(onClick = { ensureNotifications(); sounds.setMix(mix) }, label = { Text(name) }, shape = CircleShape)
                 }
             }
         }
         items(SoundId.entries.toList(), key = { it.name }) { id ->
-            SoundCard(id, levels[id] ?: 0f) { level -> if (level > 0f) ensureNotifications(); MindFlow.set(context, id, level) }
+            SoundCard(id, levels[id] ?: 0f) { level -> if (level > 0f) ensureNotifications(); sounds.set(id, level) }
         }
         item(span = { GridItemSpan(2) }) {
             Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -192,17 +178,17 @@ fun MindFlowTab() {
                     )
                 }
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = timerEnd == 0L, onClick = { MindFlow.setTimer(0) }, label = { Text("Off") }, shape = CircleShape)
+                    FilterChip(selected = timerEnd == 0L, onClick = { sounds.setTimer(0) }, label = { Text("Off") }, shape = CircleShape)
                     listOf(15, 30, 45, 60, 90).forEach { m ->
-                        FilterChip(selected = false, onClick = { MindFlow.setTimer(m) }, label = { Text("$m min") }, shape = CircleShape)
+                        FilterChip(selected = false, onClick = { sounds.setTimer(m) }, label = { Text("$m min") }, shape = CircleShape)
                     }
                 }
                 AnimatedVisibility(levels.isNotEmpty()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = { if (paused) MindFlow.resume(context) else MindFlow.pause(context) }, modifier = Modifier.weight(1f).height(52.dp)) {
+                        Button(onClick = { if (paused) sounds.resume() else sounds.pause() }, modifier = Modifier.weight(1f).height(52.dp)) {
                             Icon(if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, null); Spacer(Modifier.width(8.dp)); Text(if (paused) "Play" else "Pause")
                         }
-                        FilledTonalButton(onClick = { MindFlow.stopAll(context) }, modifier = Modifier.weight(1f).height(52.dp)) {
+                        FilledTonalButton(onClick = { sounds.stopAll() }, modifier = Modifier.weight(1f).height(52.dp)) {
                             Icon(Icons.Rounded.Stop, null); Spacer(Modifier.width(8.dp)); Text("Stop")
                         }
                     }

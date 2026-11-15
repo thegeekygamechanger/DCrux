@@ -1,9 +1,7 @@
 package app.dcrux.ui.tests
 
-import android.content.ActivityNotFoundException
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import app.dcrux.ui.OnBack
+import app.dcrux.LocalGraph
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -79,8 +77,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -88,7 +84,6 @@ import app.dcrux.ai.AiRepo
 import app.dcrux.data.MainsAnswer
 import app.dcrux.data.MainsMark
 import app.dcrux.data.fmtMarks
-import app.dcrux.graph
 import app.dcrux.mains.MainsStore
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
@@ -116,8 +111,7 @@ private fun clock(seconds: Int) = "%d:%02d".format(seconds / 60, seconds % 60)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MainsRunScreen() {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val draftState by g.mains.draft.collectAsState()
@@ -156,20 +150,17 @@ fun MainsRunScreen() {
         if (!cur.stopped[index] && cur.pages[index].isEmpty() && !evaluating) g.mains.startTimer(index) else if (cur.runningIndex != index) g.mains.stopTimer()
     }
     // Keep the screen on while a clock runs, so the time stays in view while writing.
-    val view = LocalView.current
     DisposableEffect(d.runningIndex >= 0) {
-        view.keepScreenOn = d.runningIndex >= 0
-        onDispose { view.keepScreenOn = false }
+        g.platform.keepScreenOn(d.runningIndex >= 0)
+        onDispose { g.platform.keepScreenOn(false) }
     }
-    BackHandler { if (evaluating) nav.pop() else confirmLeave = true }
+    OnBack { if (evaluating) nav.pop() else confirmLeave = true }
 
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { _ ->
-        scope.launch { importing = true; g.mains.captureFinished(); importing = false }
-    }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) scope.launch {
+    val camera = g.platform.rememberCamera { scope.launch { importing = true; g.mains.captureFinished(); importing = false } }
+    val picker = g.platform.rememberPagePicker { picked ->
+        if (picked.isNotEmpty()) scope.launch {
             importing = true
-            val added = g.mains.importFiles(index, uris)
+            val added = g.mains.importFiles(index, picked)
             importing = false
             message = if (added == 0) "Those files could not be read. Choose photos (JPG or PNG) or a PDF." else null
         }
@@ -290,17 +281,15 @@ fun MainsRunScreen() {
                         message?.let { if (i == index) Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                         val room = pages.size < MainsStore.MAX_PAGES
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(enabled = room && !importing, modifier = Modifier.weight(1f), onClick = {
+                            // A computer has no camera to hand the page to; pages come from files there.
+                            if (camera != null) Button(enabled = room && !importing, modifier = Modifier.weight(1f), onClick = {
                                 message = null
-                                try { camera.launch(g.mains.newCapture(i)) }
-                                catch (e: ActivityNotFoundException) { message = "No camera app was found. Use Upload instead." }
-                                catch (e: Exception) { message = "The camera could not be opened. Use Upload instead." }
+                                runCatching { camera(g.mains.newCapture(i)) }.onFailure { message = "The camera could not be opened. Use Upload instead." }
                             }) { Icon(Icons.Rounded.CameraAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Camera") }
                             FilledTonalButton(enabled = room && !importing, modifier = Modifier.weight(1f), onClick = {
                                 message = null
-                                try { picker.launch(arrayOf("image/*", "application/pdf")) }
-                                catch (e: Exception) { message = "No file picker was found on this phone." }
-                            }) { Icon(Icons.Rounded.UploadFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Upload") }
+                                runCatching { picker() }.onFailure { message = "No file picker was found on this device." }
+                            }) { Icon(Icons.Rounded.UploadFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(if (camera == null) "Choose files" else "Upload") }
                         }
                     }
                 }

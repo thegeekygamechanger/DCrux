@@ -1,5 +1,6 @@
 package app.dcrux.ui.news
 
+import app.dcrux.LocalGraph
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -68,7 +69,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,7 +79,6 @@ import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Stop
-import app.dcrux.graph
 import app.dcrux.ui.components.Markdown
 import kotlinx.coroutines.launch
 
@@ -102,7 +101,7 @@ private val videoStarters = listOf(
 /** Ask AI about one article. */
 @Composable
 fun AskSheet(item: NewsItem, sourceName: String, onDismiss: () -> Unit) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     AskSheet(remember(item.id) { g.ai.topicFor(item, sourceName) }, "$sourceName · ${Dates.prettyDay(item.dayKey)}", onDismiss)
 }
 
@@ -114,7 +113,7 @@ fun AskSheet(item: NewsItem, sourceName: String, onDismiss: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AskSheet(topic: AiRepo.AskTopic, subtitle: String, onDismiss: () -> Unit) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val id = topic.id
@@ -276,7 +275,7 @@ private fun Sources(sources: List<Pair<String, String>>, onOpen: (String) -> Uni
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(runCatching { android.net.Uri.parse(url).host }.getOrNull() ?: url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    Text(runCatching { java.net.URI(url).host }.getOrNull() ?: url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
             }
         }

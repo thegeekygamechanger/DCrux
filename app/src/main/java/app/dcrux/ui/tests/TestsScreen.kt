@@ -1,6 +1,8 @@
 package app.dcrux.ui.tests
 
-import androidx.activity.compose.BackHandler
+import app.dcrux.ui.OnBack
+import androidx.compose.ui.graphics.ImageBitmap
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -82,10 +84,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -109,9 +109,6 @@ import app.dcrux.data.Dates
 import app.dcrux.data.Settings
 import app.dcrux.data.TestRecord
 import app.dcrux.data.TestResult
-import app.dcrux.graph
-import app.dcrux.pdf.PdfShareProvider
-import app.dcrux.pdf.ResultPdf
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import app.dcrux.ui.ScreenBar
@@ -178,7 +175,7 @@ private fun reshuffled(questions: List<QuizQuestion>): List<QuizQuestion> = ques
 
 @Composable
 fun TestsTab(settings: Settings) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val records by g.db.tests().observeAll().collectAsState(initial = emptyList())
@@ -499,7 +496,7 @@ fun retakeNote(improved: Boolean, previous: String, result: TestResult?): String
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TestRunScreen(screen: Screen.TestRun) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val questions = screen.questions
@@ -512,7 +509,7 @@ fun TestRunScreen(screen: Screen.TestRun) {
     var saving by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { while (true) { delay(1000); seconds = ((System.currentTimeMillis() - startedAt) / 1000).toInt() } }
-    BackHandler { confirmLeave = true }
+    OnBack { confirmLeave = true }
 
     fun submit() {
         if (saving) return
@@ -613,8 +610,7 @@ fun ScoreTag(score: Int, modifier: Modifier = Modifier) {
 fun TestReviewScreen(screen: Screen.TestReview) {
     val id = screen.id
     val fresh = screen.fresh
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val stored by produceState<TestResult?>(null, id) {
         value = withContext(Dispatchers.Default) { g.db.tests().get(id)?.let { decode(g, it) } }
@@ -629,7 +625,7 @@ fun TestReviewScreen(screen: Screen.TestReview) {
         ScreenBar("Result", onBack = { nav.pop() }) {
             if (canPdf) {
                 IconButton(onClick = { nav.push(Screen.PdfPreview(id)) }) { Icon(Icons.Rounded.PictureAsPdf, "View as PDF") }
-                IconButton(onClick = { PdfShareProvider.share(context, id) }) { Icon(Icons.Rounded.IosShare, "Share PDF") }
+                IconButton(onClick = { g.platform.sharePdf(id) }) { Icon(Icons.Rounded.IosShare, "Share PDF") }
             }
         }
         if (r == null) return@Column
@@ -703,7 +699,7 @@ fun TestReviewScreen(screen: Screen.TestReview) {
                                 FilledTonalButton(onClick = { nav.push(Screen.PdfPreview(id)) }) {
                                     Icon(Icons.Rounded.PictureAsPdf, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("View PDF")
                                 }
-                                OutlinedButton(onClick = { PdfShareProvider.share(context, id) }) {
+                                OutlinedButton(onClick = { g.platform.sharePdf(id) }) {
                                     Icon(Icons.Rounded.IosShare, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Share")
                                 }
                             }
@@ -758,17 +754,14 @@ fun TestReviewScreen(screen: Screen.TestReview) {
 /** Shows the PDF pages, rendered just now in memory. Leaving the screen frees them. */
 @Composable
 fun PdfPreviewScreen(id: Long) {
-    val context = LocalContext.current
-    val g = context.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
-    val pages by produceState<List<android.graphics.Bitmap>?>(null, id) {
-        value = withContext(Dispatchers.Default) {
-            g.db.tests().get(id)?.let { decode(g, it) }?.let { ResultPdf.bitmaps(context.applicationContext, it) }.orEmpty()
-        }
+    val pages by produceState<List<ImageBitmap>?>(null, id) {
+        value = withContext(Dispatchers.Default) { g.db.tests().get(id)?.let { decode(g, it) }?.let { g.platform.pdfPages(it) }.orEmpty() }
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHighest).statusBarsPadding()) {
         ScreenBar("PDF", onBack = { nav.pop() }) {
-            IconButton(onClick = { PdfShareProvider.share(context, id) }) { Icon(Icons.Rounded.IosShare, "Share PDF") }
+            IconButton(onClick = { g.platform.sharePdf(id) }) { Icon(Icons.Rounded.IosShare, "Share PDF") }
         }
         val list = pages
         if (list == null) {
@@ -780,7 +773,7 @@ fun PdfPreviewScreen(id: Long) {
             ) {
                 itemsIndexed(list) { i, bmp ->
                     Image(
-                        bmp.asImageBitmap(), "Page ${i + 1}", contentScale = ContentScale.FillWidth,
+                        bmp, "Page ${i + 1}", contentScale = ContentScale.FillWidth,
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White),
                     )
                 }

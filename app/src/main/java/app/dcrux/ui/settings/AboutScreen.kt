@@ -1,7 +1,6 @@
 package app.dcrux.ui.settings
 
-import android.content.Intent
-import android.net.Uri
+import app.dcrux.LocalGraph
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -48,11 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.dcrux.ui.components.appBackground
-import app.dcrux.BuildConfig
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.ScreenBar
 import app.dcrux.ui.components.AnimatedLogo
@@ -93,9 +90,9 @@ private enum class Info(val title: String, val line: String, val icon: ImageVect
 
 @Composable
 fun AboutScreen() {
-    val context = LocalContext.current
+    val g = LocalGraph.current
     val nav = LocalNav.current
-    fun open(url: String) = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    fun open(url: String) = g.platform.openUrl(url)
     var sheet by rememberSaveable { mutableStateOf<Info?>(null) }
 
     Column(Modifier.fillMaxSize().appBackground().statusBarsPadding()) {
@@ -112,7 +109,7 @@ fun AboutScreen() {
                     Text("DCrux", style = MaterialTheme.typography.displaySmall)
                     Text("The daily crux of current affairs", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
-                    Tag("Version ${BuildConfig.VERSION_NAME}")
+                    Tag("Version ${g.platform.versionName}")
                 }
             }
             items(Info.entries, key = { it.name }) { info ->
@@ -151,7 +148,7 @@ fun AboutScreen() {
             FilledTonalButton(onClick = { open("https://theharshkumar.in") }) {
                 Icon(Icons.Rounded.Language, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("theharshkumar.in")
             }
-            SheetPara("Version", "${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}). Updates come from the project's GitHub releases; see Settings → App update.")
+            SheetPara("Version", "${g.platform.versionName} (build ${g.platform.versionCode}). Updates come from the project's GitHub releases; see Settings → App update.")
             SheetPara("Open source", "DCrux is free and open source under the Apache License 2.0. No account, no ads, no analytics.")
             FilledTonalButton(onClick = { open("https://github.com/thegeekygamechanger/DCrux") }) {
                 Icon(Icons.Rounded.Code, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Source code on GitHub")

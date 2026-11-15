@@ -18,6 +18,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
+import okio.ByteString.Companion.toByteString
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
@@ -193,7 +194,7 @@ class ClaudeClient {
                                 putJsonObject("source") {
                                     put("type", "base64")
                                     put("media_type", "image/jpeg")
-                                    put("data", android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP))
+                                    put("data", jpeg.toByteString().base64())
                                 }
                             })
                         }

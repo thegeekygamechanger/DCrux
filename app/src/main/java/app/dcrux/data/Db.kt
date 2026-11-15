@@ -1,19 +1,19 @@
 package app.dcrux.data
 
-import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ChannelDao {
+    /** Used by "Reset app". */
+    @Query("DELETE FROM channels")
+    suspend fun clear()
+
     @Query("SELECT * FROM channels ORDER BY isDefault DESC, addedAt ASC")
     fun observeAll(): Flow<List<Channel>>
 
@@ -38,6 +38,10 @@ interface ChannelDao {
 
 @Dao
 interface VideoDao {
+    /** Used by "Reset app". */
+    @Query("DELETE FROM videos")
+    suspend fun clear()
+
     @Query(
         "SELECT * FROM videos WHERE channelId = :ch AND (:shorts = 1 OR isShort = 0) " +
             "ORDER BY publishedAt DESC LIMIT :limit OFFSET :offset"
@@ -91,6 +95,10 @@ interface VideoDao {
 
 @Dao
 interface NewsDao {
+    /** Used by "Reset app". */
+    @Query("DELETE FROM news")
+    suspend fun clear()
+
     @Query(
         "SELECT * FROM news WHERE sourceId = :src AND dayKey = :day AND topScore >= :minScore " +
             "ORDER BY CASE WHEN :byScore = 1 THEN topScore ELSE 0 END DESC, publishedAt DESC LIMIT :limit OFFSET :offset"
@@ -139,6 +147,10 @@ interface NewsDao {
 
 @Dao
 interface TestDao {
+    /** Used by "Reset app". */
+    @Query("DELETE FROM tests")
+    suspend fun clear()
+
     @Insert
     suspend fun insert(t: TestRecord): Long
 
@@ -157,6 +169,10 @@ interface TestDao {
 
 @Dao
 interface AskDao {
+    /** Used by "Reset app". */
+    @Query("DELETE FROM asks")
+    suspend fun clear()
+
     @Query("SELECT * FROM asks WHERE articleId = :articleId ORDER BY askedAt ASC")
     fun forArticle(articleId: String): Flow<List<Ask>>
 
@@ -183,27 +199,24 @@ abstract class AppDb : RoomDatabase() {
     abstract fun news(): NewsDao
     abstract fun tests(): TestDao
     abstract fun asks(): AskDao
-
-    companion object {
-        /** 2 -> 3 records, with each question, the title of what it was asked on. Existing questions keep an empty title. */
-        private val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE `asks` ADD COLUMN `topic` TEXT NOT NULL DEFAULT ''")
-            }
-        }
-
-        /** 1 -> 2 adds the questions asked about articles. Nothing already on the phone is touched. */
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "CREATE TABLE IF NOT EXISTS `asks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `articleId` TEXT NOT NULL, " +
-                        "`question` TEXT NOT NULL, `answer` TEXT NOT NULL, `askedAt` INTEGER NOT NULL, `thinking` TEXT NOT NULL, `followups` TEXT NOT NULL)"
-                )
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_articleId` ON `asks` (`articleId`)")
-            }
-        }
-
-        fun open(context: Context): AppDb =
-            Room.databaseBuilder(context, AppDb::class.java, "dcrux.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
-    }
 }
+
+/** Empties every table: "Reset app". (Room's own clearAllTables exists only on Android.) */
+suspend fun AppDb.wipe() {
+    channels().clear(); videos().clear(); news().clear(); tests().clear(); asks().clear()
+}
+
+/**
+ * Every change of the database's shape, as the SQL that makes it, keyed by the version it starts
+ * from. Each platform wraps these in its own migration type, so the steps are written once.
+ */
+val DB_MIGRATIONS: Map<Int, List<String>> = mapOf(
+    // 1 -> 2 adds the questions asked about articles. Nothing already on the device is touched.
+    1 to listOf(
+        "CREATE TABLE IF NOT EXISTS `asks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `articleId` TEXT NOT NULL, " +
+            "`question` TEXT NOT NULL, `answer` TEXT NOT NULL, `askedAt` INTEGER NOT NULL, `thinking` TEXT NOT NULL, `followups` TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS `index_asks_articleId` ON `asks` (`articleId`)",
+    ),
+    // 2 -> 3 records, with each question, the title of what it was asked on. Existing questions keep an empty title.
+    2 to listOf("ALTER TABLE `asks` ADD COLUMN `topic` TEXT NOT NULL DEFAULT ''"),
+)

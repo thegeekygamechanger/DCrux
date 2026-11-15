@@ -1,54 +1,40 @@
 package app.dcrux.data
 
-import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
-import java.security.KeyStore
+import okio.ByteString.Companion.decodeBase64
+import okio.ByteString.Companion.toByteString
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 
 /**
- * Secrets at rest. Everything is AES-256-GCM encrypted with a key that is generated
- * inside the Android Keystore and cannot be exported, so the ciphertext is useless
- * off this device. Backups and device transfer are disabled in the manifest, which
- * means the API key lives exactly as long as the app's data on this phone.
+ * Secrets at rest. Everything is AES-256-GCM encrypted with a key that never leaves the device:
+ * on Android it is generated inside the Keystore and cannot be exported; on a computer it is kept
+ * in a file only the user's own account can read. Where the key and the small encrypted values
+ * are kept is the platform's business; everything else is the same.
  */
-class SecureStore(context: Context) {
-    private val prefs = context.getSharedPreferences("dcrux_secure", Context.MODE_PRIVATE)
-
-    private fun key(): SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
-        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        gen.init(
-            KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build()
-        )
-        return gen.generateKey()
-    }
+abstract class SecureStore {
+    protected abstract fun key(): SecretKey
+    protected abstract fun read(name: String): String?
+    protected abstract fun write(name: String, value: String?)
+    protected abstract fun has(name: String): Boolean
+    protected abstract fun clearAll()
 
     @Synchronized
     fun encrypt(plain: String): String {
         val cipher = Cipher.getInstance(TRANSFORM)
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val ct = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
-        return Base64.encodeToString(cipher.iv + ct, Base64.NO_WRAP)
+        return (cipher.iv + ct).toByteString().base64()
     }
 
-    /** Returns null when the value cannot be decrypted (wrong device, wiped keystore). */
+    /** Returns null when the value cannot be decrypted (wrong device, wiped key). */
     @Synchronized
     fun decrypt(encoded: String): String? = try {
-        val raw = Base64.decode(encoded, Base64.NO_WRAP)
+        val raw = encoded.decodeBase64()!!.toByteArray()
         val cipher = Cipher.getInstance(TRANSFORM)
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw, 0, IV_LEN))
         String(cipher.doFinal(raw, IV_LEN, raw.size - IV_LEN), Charsets.UTF_8)
@@ -58,62 +44,59 @@ class SecureStore(context: Context) {
 
     // --- Claude API key ---------------------------------------------------------------
 
-    fun saveApiKey(apiKey: String) = prefs.edit().putString(K_API, encrypt(apiKey.trim())).apply()
-
-    fun apiKey(): String? = prefs.getString(K_API, null)?.let(::decrypt)
-
-    fun hasApiKey(): Boolean = prefs.contains(K_API)
-
-    fun clearApiKey() = prefs.edit().remove(K_API).apply()
+    fun saveApiKey(apiKey: String) = write(K_API, encrypt(apiKey.trim()))
+    fun apiKey(): String? = read(K_API)?.let(::decrypt)
+    fun hasApiKey(): Boolean = has(K_API)
+    fun clearApiKey() = write(K_API, null)
 
     /** Safe to show on screen: never more than the prefix and the last four characters. */
     fun maskedApiKey(): String? = apiKey()?.let { k ->
         if (k.length < 12) "••••" else k.take(7) + "••••••••" + k.takeLast(4)
     }
 
-    /** A random id made once per install. It identifies nothing about the person or the phone. */
-    fun deviceId(): String = prefs.getString(K_DEVICE, null) ?: java.util.UUID.randomUUID().toString().replace("-", "").also {
-        prefs.edit().putString(K_DEVICE, it).apply()
-    }
+    /** A random id made once per install. It identifies nothing about the person or the device. */
+    fun deviceId(): String = read(K_DEVICE) ?: java.util.UUID.randomUUID().toString().replace("-", "").also { write(K_DEVICE, it) }
+
+    // --- Sync across devices ----------------------------------------------------------
+
+    /** The pairing secret shared by this person's devices, or null when sync is off. Stored encrypted. */
+    fun syncSecret(): String? = read(K_SYNC)?.let(::decrypt)
+    fun setSyncSecret(secret: String?) = write(K_SYNC, secret?.let(::encrypt))
 
     // --- App-lock PIN -----------------------------------------------------------------
 
-    fun hasPin(): Boolean = prefs.contains(K_PIN)
+    fun hasPin(): Boolean = has(K_PIN)
 
     fun setPin(pin: String) {
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
-        val record = Base64.encodeToString(salt, Base64.NO_WRAP) + ":" +
-            Base64.encodeToString(hashPin(pin, salt), Base64.NO_WRAP)
-        prefs.edit().putString(K_PIN, encrypt(record)).apply()
+        val record = salt.toByteString().base64() + ":" + hashPin(pin, salt).toByteString().base64()
+        write(K_PIN, encrypt(record))
     }
 
     fun checkPin(pin: String): Boolean {
-        val record = prefs.getString(K_PIN, null)?.let(::decrypt) ?: return false
+        val record = read(K_PIN)?.let(::decrypt) ?: return false
         val parts = record.split(":")
         if (parts.size != 2) return false
-        val salt = Base64.decode(parts[0], Base64.NO_WRAP)
-        val expected = Base64.decode(parts[1], Base64.NO_WRAP)
+        val salt = parts[0].decodeBase64()?.toByteArray() ?: return false
+        val expected = parts[1].decodeBase64()?.toByteArray() ?: return false
         return MessageDigest.isEqual(expected, hashPin(pin, salt))
     }
 
-    fun clearPin() = prefs.edit().remove(K_PIN).apply()
+    fun clearPin() = write(K_PIN, null)
 
     private fun hashPin(pin: String, salt: ByteArray): ByteArray =
         SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1")
             .generateSecret(PBEKeySpec(pin.toCharArray(), salt, 60_000, 256)).encoded
 
-    /** Used by "Reset app": drops every secret and the keystore key itself. */
-    fun wipe() {
-        prefs.edit().clear().apply()
-        runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(ALIAS) }
-    }
+    /** Used by "Reset app": drops every secret and the key itself. */
+    open fun wipe() = clearAll()
 
-    private companion object {
-        const val ALIAS = "dcrux_master_v1"
+    protected companion object {
         const val TRANSFORM = "AES/GCM/NoPadding"
         const val IV_LEN = 12
         const val K_API = "claude_api_key"
         const val K_PIN = "app_pin"
         const val K_DEVICE = "install_id"
+        const val K_SYNC = "sync_secret"
     }
 }

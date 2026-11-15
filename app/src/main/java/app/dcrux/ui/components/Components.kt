@@ -1,5 +1,6 @@
 package app.dcrux.ui.components
 
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
@@ -22,8 +23,6 @@ import androidx.compose.foundation.layout.Arrangement
 import kotlinx.serialization.Serializable
 import coil3.compose.AsyncImage
 import app.dcrux.net.OpenImage
-import app.dcrux.graph
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.produceState
 import androidx.compose.material.icons.rounded.ArrowDownward
@@ -388,7 +387,7 @@ fun Tag(text: String, modifier: Modifier = Modifier, bg: Color = MaterialTheme.c
 /** An openly licensed photo for the subject, with its credit. Shows nothing when none is found. */
 @Composable
 fun OpenPicture(query: String, modifier: Modifier = Modifier) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val image by produceState<OpenImage?>(null, query) { value = runCatching { g.commons.find(query) }.getOrNull() }
     val img = image ?: return
     Column(modifier) {

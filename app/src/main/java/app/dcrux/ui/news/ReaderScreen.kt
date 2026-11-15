@@ -1,7 +1,7 @@
 package app.dcrux.ui.news
 
-import android.app.Activity
-import androidx.activity.compose.BackHandler
+import app.dcrux.ui.OnBack
+import app.dcrux.LocalGraph
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -73,16 +73,11 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import app.dcrux.data.Settings
-import app.dcrux.graph
 import app.dcrux.ui.LocalNav
 import app.dcrux.ui.Screen
 import app.dcrux.ui.ScreenBar
@@ -128,7 +123,7 @@ private fun splitTopics(body: String): List<Topic> {
  */
 @Composable
 fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
-    val g = LocalContext.current.graph
+    val g = LocalGraph.current
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val dark = LocalExtra.current.dark
@@ -144,17 +139,9 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
 
     // Full screen: the system bars, the title bar and the page numbers step aside and the page takes the whole display.
     var full by rememberSaveable { mutableStateOf(false) }
-    val activity = LocalContext.current as? Activity
     DisposableEffect(full) {
-        val window = activity?.window
-        if (window != null) {
-            val bars = WindowCompat.getInsetsController(window, window.decorView)
-            if (full) {
-                bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                bars.hide(WindowInsetsCompat.Type.systemBars())
-            } else bars.show(WindowInsetsCompat.Type.systemBars())
-        }
-        onDispose { activity?.window?.let { WindowCompat.getInsetsController(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) } }
+        g.platform.setImmersive(full)
+        onDispose { g.platform.setImmersive(false) }
     }
     // Ask AI about what is being read; available in full screen too.
     val canAsk = remember { g.secure.hasApiKey() || g.hasBuiltInKey }
@@ -166,7 +153,7 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
     var pagesLeft by remember { mutableIntStateOf(0) }
     var askExit by remember { mutableStateOf(false) }
     fun leaveFull() { if (pagesLeft > 0) askExit = true else full = false }
-    BackHandler(enabled = full) { leaveFull() }
+    OnBack(enabled = full) { leaveFull() }
     if (askExit) AlertDialog(
         onDismissRequest = { askExit = false },
         title = { Text("Finish before you leave?") },
