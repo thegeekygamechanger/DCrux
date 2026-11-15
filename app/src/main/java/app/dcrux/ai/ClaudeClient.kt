@@ -43,18 +43,18 @@ class ClaudeException(val kind: Kind, message: String, val status: Int = 0, val 
             Kind.NOT_FOUND -> "That model is not available for this API key."
             // The service explains its own daily limits in plain words; pass those on as they are.
             Kind.RATE_LIMIT -> message?.takeIf { it.contains("tomorrow") } ?: "Rate limit reached. Try again in a little while."
-            Kind.OVERLOADED -> "The AI is busy right now. Try again shortly."
+            Kind.OVERLOADED -> "Crux AI is busy right now. Try again shortly."
             Kind.TOO_LARGE -> "This is too long to send in one request."
             Kind.SERVER -> "The AI service had a problem. Try again."
             Kind.NETWORK -> "No connection to the AI service. Check the internet and try again."
-            Kind.REFUSAL -> "The AI declined to process this content."
+            Kind.REFUSAL -> "Crux AI declined to process this content."
             Kind.TRUNCATED -> "The answer was cut off before it finished. Try again."
             Kind.PARSE -> "The answer came back in an unexpected shape. Try again."
             Kind.BAD_REQUEST -> message ?: "The request was not accepted."
         }
 }
 
-data class Completion(val text: String, val model: String, val thinking: String = "")
+data class Completion(val text: String, val model: String, val thinking: String = "", val sources: List<Pair<String, String>> = emptyList())
 
 /** How to reach the DCrux service: its address, this install's id and the secret requests are signed with. */
 class ServiceAuth(val baseUrl: String, val deviceId: String, val secret: ByteArray)
@@ -138,10 +138,16 @@ class ClaudeClient {
         effort: String = "low",
         maxTokens: Int = 16000,
         showThinking: Boolean = false,
+        /** JPEG pictures to show the model ahead of the text (photos of a handwritten answer). */
+        images: List<ByteArray> = emptyList(),
+        /** Lets the model look things up on the web (a few searches at most) when the material does not hold the answer. */
+        webSearch: Boolean = false,
+        onSearching: () -> Unit = {},
         onThinking: (String) -> Unit = {},
         onText: (String) -> Unit = {},
     ): Completion = withContext(Dispatchers.IO) {
         val useSchema = schema != null && model.structured
+        val prompt = if (schema != null && !useSchema) "$user\n\nReply with one JSON object only, matching this JSON Schema:\n$schema" else user
         val body = buildJsonObject {
             put("model", model.id)
             put("max_tokens", minOf(maxTokens, model.maxTokens))
@@ -150,12 +156,20 @@ class ClaudeClient {
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "user")
-                    put(
-                        "content",
-                        if (schema != null && !useSchema)
-                            "$user\n\nReply with one JSON object only, matching this JSON Schema:\n$schema"
-                        else user
-                    )
+                    if (images.isEmpty()) put("content", prompt)
+                    else put("content", buildJsonArray {
+                        images.forEach { jpeg ->
+                            add(buildJsonObject {
+                                put("type", "image")
+                                putJsonObject("source") {
+                                    put("type", "base64")
+                                    put("media_type", "image/jpeg")
+                                    put("data", android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP))
+                                }
+                            })
+                        }
+                        add(buildJsonObject { put("type", "text"); put("text", prompt) })
+                    })
                 })
             })
             if (useSchema || effort in model.efforts) {
@@ -173,6 +187,9 @@ class ClaudeClient {
                 put("type", "adaptive")
                 put("display", "summarized")
             }
+            if (webSearch) put("tools", buildJsonArray {
+                add(buildJsonObject { put("type", WEB_SEARCH); put("name", "web_search"); put("max_uses", 3) })
+            })
             // If a safety classifier declines, let the API retry on its recommended model.
             if (model.fallbacks) put("fallbacks", "default")
         }
@@ -190,6 +207,7 @@ class ClaudeClient {
                 if (!r.isSuccessful) throw httpError(r, r.body.string())
                 val sb = StringBuilder()
                 val thought = StringBuilder()
+                val sources = LinkedHashMap<String, String>()
                 var stop: String? = null
                 var served = model.id
                 val src = r.body.source()
@@ -202,6 +220,7 @@ class ClaudeClient {
                             "message_start" -> ev["message"]?.jsonObject?.get("model")?.jsonPrimitive?.content?.let { served = it }
                             "content_block_start" -> {
                                 // A fallback block marks a switch of model: drop the declined model's partial text.
+                                if (ev["content_block"]?.jsonObject?.get("type")?.jsonPrimitive?.content == "server_tool_use") onSearching()
                                 if (ev["content_block"]?.jsonObject?.get("type")?.jsonPrimitive?.content == "fallback") {
                                     sb.setLength(0)
                                     ev["content_block"]?.jsonObject?.get("to")?.jsonObject?.get("model")?.jsonPrimitive?.content?.let { served = it }
@@ -213,6 +232,11 @@ class ClaudeClient {
                                     "text_delta" -> {
                                         sb.append(d["text"]?.jsonPrimitive?.content.orEmpty())
                                         onText(sb.toString())
+                                    }
+                                    // A web page the sentence just written rests on.
+                                    "citations_delta" -> (d["citation"] as? JsonObject)?.let { c ->
+                                        val url = c["url"]?.jsonPrimitive?.content.orEmpty()
+                                        if (url.startsWith("http") && sources.size < 6) sources.getOrPut(url) { c["title"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: url }
                                     }
                                     "thinking_delta" -> {
                                         thought.append(d["thinking"]?.jsonPrimitive?.content.orEmpty())
@@ -236,7 +260,7 @@ class ClaudeClient {
                     "max_tokens" -> throw ClaudeException(ClaudeException.Kind.TRUNCATED, "max_tokens")
                     null -> throw ClaudeException(ClaudeException.Kind.NETWORK, "The stream ended early")
                 }
-                Completion(sb.toString(), served, thought.toString().trim())
+                Completion(sb.toString(), served, thought.toString().trim(), sources.map { it.value to it.key })
             }
         } finally {
             handle.dispose()
@@ -278,6 +302,7 @@ class ClaudeClient {
         const val VIA_SERVICE = "via-dcrux-service"
         const val VERSION = "2026-10-21"
         const val FALLBACK_BETA = "server-side-fallback-2026-07-01"
+        const val WEB_SEARCH = "web_search_20250305"
         val EFFORTS = listOf("low", "medium", "high", "xhigh", "max")
 
         /** Models that take adaptive thinking with a summary. */

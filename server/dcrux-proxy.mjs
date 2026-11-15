@@ -5,6 +5,10 @@
 // of models, and counts requests per device, per address and overall so one install (or one
 // person with curl) cannot run up the bill. No request or response text is logged or stored.
 //
+// The limits are set high enough that no real user meets them; they are circuit breakers
+// against abuse, not a ration. Requests are streamed straight through, and connections to
+// the API are kept open between requests, so the relay adds almost no waiting of its own.
+//
 // Node 18+, no dependencies. Configuration is by environment variables (see README.md).
 
 import http from 'node:http';
@@ -20,10 +24,17 @@ const cfg = {
   appSecret: env.DCRUX_APP_SECRET || '',
   models: (env.DCRUX_MODELS || 'claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5').split(',').map(s => s.trim()).filter(Boolean),
   maxTokens: Number(env.DCRUX_MAX_TOKENS || 32000),
-  maxBody: Number(env.DCRUX_MAX_BODY_BYTES || 3_000_000),
-  perDevice: Number(env.DCRUX_DEVICE_DAILY || 60),
-  perAddress: Number(env.DCRUX_ADDRESS_DAILY || 150),
-  overall: Number(env.DCRUX_GLOBAL_DAILY || 2000),
+  // Room for the photographed pages of one handwritten answer (up to 8 pictures).
+  maxBody: Number(env.DCRUX_MAX_BODY_BYTES || 12_000_000),
+  maxImages: Number(env.DCRUX_MAX_IMAGES || 8),
+  // Web searches one answer may make (each search is billed by the API).
+  maxSearches: Number(env.DCRUX_MAX_SEARCHES || 3),
+  perDevice: Number(env.DCRUX_DEVICE_DAILY || 1000),
+  // Mobile networks put thousands of phones behind one address, so this has to be generous.
+  perAddress: Number(env.DCRUX_ADDRESS_DAILY || 20000),
+  overall: Number(env.DCRUX_GLOBAL_DAILY || 100000),
+  // Requests one install may have running at the same moment.
+  concurrent: Number(env.DCRUX_DEVICE_CONCURRENT || 8),
   stateFile: env.DCRUX_STATE_FILE || '',
   upstream: env.DCRUX_UPSTREAM || 'https://api.anthropic.com',
 };
@@ -32,7 +43,7 @@ if (!cfg.apiKey || !cfg.appSecret) {
   process.exit(1);
 }
 
-const ALLOWED_BODY_KEYS = new Set(['model', 'max_tokens', 'stream', 'system', 'messages', 'output_config', 'fallbacks', 'thinking']);
+const ALLOWED_BODY_KEYS = new Set(['model', 'max_tokens', 'stream', 'system', 'messages', 'output_config', 'fallbacks', 'thinking', 'tools']);
 const ALLOWED_BETAS = new Set(['server-side-fallback-2026-07-01']);
 
 // ---- daily counters (India time, since that is where the users are) ----
@@ -49,9 +60,15 @@ const save = () => { if (cfg.stateFile) { try { fs.writeFileSync(cfg.stateFile, 
 setInterval(save, 60_000).unref();
 const short = v => crypto.createHash('sha256').update(v).digest('hex').slice(0, 16);
 
+// Signatures already used, so a captured request cannot be sent a second time.
+const seen = new Map();
+setInterval(() => { const cut = Date.now() - 11 * 60_000; for (const [k, t] of seen) if (t < cut) seen.delete(k); }, 60_000).unref();
+// Requests in flight per install.
+const inflight = new Map();
+
 function send(res, status, type, message, extra = {}) {
   const body = JSON.stringify({ type: 'error', error: { type, message } });
-  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), ...extra });
+  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...extra });
   res.end(body);
 }
 
@@ -78,17 +95,39 @@ function checkCaller(req, body) {
   const bodyHash = crypto.createHash('sha256').update(body).digest('hex');
   const want = crypto.createHmac('sha256', cfg.appSecret).update(`${device}.${ts}.${bodyHash}`).digest('hex');
   if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  if (seen.has(sig)) return null;
+  seen.set(sig, Date.now());
   return device;
+}
+
+/** Only plain text and inline pictures may be sent; nothing that makes the API fetch or run anything. */
+function checkMessages(messages) {
+  let images = 0;
+  for (const m of messages) {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant')) return 'Malformed request.';
+    if (typeof m.content === 'string') continue;
+    if (!Array.isArray(m.content)) return 'Malformed request.';
+    for (const b of m.content) {
+      if (b && b.type === 'text' && typeof b.text === 'string') continue;
+      if (b && b.type === 'image' && b.source && b.source.type === 'base64' && typeof b.source.data === 'string' &&
+          ['image/jpeg', 'image/png', 'image/webp'].includes(b.source.media_type)) { images++; continue; }
+      return 'That kind of content is not available through this service.';
+    }
+  }
+  return images > cfg.maxImages ? 'Too many pictures in one request.' : null;
 }
 
 function addressOf(req) {
   return String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.socket.remoteAddress || 'unknown');
 }
 
+// Connections to the API stay open between requests, which saves a TLS handshake on each one.
+const agents = { 'https:': new https.Agent({ keepAlive: true, maxSockets: 256, maxFreeSockets: 32 }), 'http:': new http.Agent({ keepAlive: true, maxSockets: 256 }) };
+
 function upstreamRequest(method, path, headers, body, onResponse, onError) {
   const u = new URL(cfg.upstream + path);
   const lib = u.protocol === 'http:' ? http : https;
-  const up = lib.request({ method, hostname: u.hostname, port: u.port || undefined, path: u.pathname + u.search, headers }, onResponse);
+  const up = lib.request({ method, hostname: u.hostname, port: u.port || undefined, path: u.pathname + u.search, headers, agent: agents[u.protocol] }, onResponse);
   up.on('error', onError);
   up.setTimeout(600_000, () => up.destroy(new Error('upstream timeout')));
   if (body) up.write(body);
@@ -142,6 +181,15 @@ const server = http.createServer(async (req, res) => {
       for (const k of Object.keys(json)) if (!ALLOWED_BODY_KEYS.has(k)) { send(res, 400, 'invalid_request_error', `"${k}" is not available through this service.`); return log(400, `key ${k}`); }
       if (!cfg.models.includes(json.model)) { send(res, 404, 'not_found_error', 'That model is not available through this service.'); return log(404, String(json.model).slice(0, 40)); }
       if (!Array.isArray(json.messages) || json.messages.length === 0 || json.messages.length > 4) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400); }
+      if (json.system !== undefined && typeof json.system !== 'string') { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'system'); }
+      const bad = checkMessages(json.messages);
+      if (bad) { send(res, 400, 'invalid_request_error', bad); return log(400, 'content'); }
+      // The only tool accepted is the API's own web search, capped at a few searches per answer (used by Ask AI).
+      if (json.tools !== undefined) {
+        const t = Array.isArray(json.tools) && json.tools.length === 1 ? json.tools[0] : null;
+        if (!t || !/^web_search_\d{8}$/.test(String(t.type)) || t.name !== 'web_search') { send(res, 400, 'invalid_request_error', 'That tool is not available through this service.'); return log(400, 'tools'); }
+        json.tools = [{ type: t.type, name: 'web_search', max_uses: Math.min(Number(t.max_uses) || 3, cfg.maxSearches) }];
+      }
       // The only thinking setting accepted is "adaptive, with a summary" (used by Ask AI).
       if (json.thinking !== undefined) json.thinking = { type: 'adaptive', display: 'summarized' };
       json.max_tokens = Math.min(Number(json.max_tokens) || 1024, cfg.maxTokens);
@@ -154,6 +202,11 @@ const server = http.createServer(async (req, res) => {
         (counters.devices[dk] || 0) >= cfg.perDevice ? 'You have reached today\'s limit on this phone. It resets tomorrow.' :
         (counters.addresses[ak] || 0) >= cfg.perAddress ? 'Too many requests from this network today. It resets tomorrow.' : null;
       if (limited) { send(res, 429, 'rate_limit_error', limited, { 'retry-after': '3600' }); return log(429, dk); }
+      if ((inflight.get(dk) || 0) >= cfg.concurrent) { send(res, 429, 'rate_limit_error', 'Too many requests at once. Try again in a moment.', { 'retry-after': '3' }); return log(429, `${dk} concurrent`); }
+      inflight.set(dk, (inflight.get(dk) || 0) + 1);
+      let released = false;
+      const release = () => { if (released) return; released = true; const n = (inflight.get(dk) || 1) - 1; if (n <= 0) inflight.delete(dk); else inflight.set(dk, n); };
+      res.on('close', release);
       counters.overall++; counters.devices[dk] = (counters.devices[dk] || 0) + 1; counters.addresses[ak] = (counters.addresses[ak] || 0) + 1;
 
       const out = Buffer.from(JSON.stringify(json));
@@ -170,7 +223,7 @@ const server = http.createServer(async (req, res) => {
         if (upRes.statusCode === 401 || upRes.statusCode === 402 || upRes.statusCode === 403) {
           upRes.resume(); send(res, 502, 'api_error', 'The AI service is not available right now.'); return log(502, `upstream ${upRes.statusCode}`);
         }
-        const pass = { 'content-type': upRes.headers['content-type'] || 'application/json', 'cache-control': 'no-store', 'x-accel-buffering': 'no' };
+        const pass = { 'content-type': upRes.headers['content-type'] || 'application/json', 'cache-control': 'no-store', 'x-accel-buffering': 'no', 'x-content-type-options': 'nosniff' };
         if (upRes.headers['retry-after']) pass['retry-after'] = upRes.headers['retry-after'];
         res.writeHead(upRes.statusCode || 502, pass);
         upRes.pipe(res);
@@ -193,5 +246,5 @@ const server = http.createServer(async (req, res) => {
 
 server.requestTimeout = 0;
 server.headersTimeout = 30_000;
-server.listen(cfg.port, cfg.host, () => console.log(`dcrux-proxy on ${cfg.host}:${cfg.port} · models ${cfg.models.join(', ')} · daily ${cfg.perDevice}/device ${cfg.perAddress}/address ${cfg.overall} overall`));
+server.listen(cfg.port, cfg.host, () => console.log(`dcrux-proxy on ${cfg.host}:${cfg.port} · models ${cfg.models.join(', ')} · daily ${cfg.perDevice}/device ${cfg.perAddress}/address ${cfg.overall} overall · ${cfg.concurrent} at once per device · body ${cfg.maxBody} bytes`));
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { save(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); });

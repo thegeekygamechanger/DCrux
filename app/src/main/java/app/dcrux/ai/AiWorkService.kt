@@ -78,7 +78,7 @@ class AiWorkService : Service() {
     private fun notification(): Notification {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "AI at work", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Crux AI at work", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
         }
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL)

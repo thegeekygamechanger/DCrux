@@ -78,6 +78,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -365,7 +366,7 @@ fun CruxCard(
 @Composable
 fun Tag(text: String, modifier: Modifier = Modifier, bg: Color = MaterialTheme.colorScheme.secondaryContainer, fg: Color = MaterialTheme.colorScheme.onSecondaryContainer) {
     Text(
-        text, color = fg, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+        text, color = fg, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
         modifier = modifier.clip(CircleShape).background(bg).padding(horizontal = 10.dp, vertical = 4.dp),
     )
 }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,7 +31,10 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Newspaper
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -76,15 +80,19 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Searches everything synced on the phone; the AI overview is written only from the hits. */
+/**
+ * Search slides up from the bottom over whatever is on screen.
+ * It looks through everything synced on the phone; the AI overview is written only from the hits.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SearchScreen(settings: Settings) {
+fun SearchSheet(settings: Settings, onDismiss: () -> Unit) {
     val g = LocalContext.current.graph
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by remember { mutableStateOf(nav.searchQuery) }
     var aiOn by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableIntStateOf(0) }
     var videos by remember { mutableStateOf<List<Video>>(emptyList()) }
@@ -100,7 +108,10 @@ fun SearchScreen(settings: Settings) {
     val hasKey = remember { g.secure.hasApiKey() || g.hasBuiltInKey }
     val q = query.trim()
 
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // Wait for the sheet to finish sliding up before raising the keyboard, or the two fight.
+    LaunchedEffect(Unit) { if (query.isBlank()) { delay(350); runCatching { focus.requestFocus() } } }
+    LaunchedEffect(query) { nav.searchQuery = query }
+    fun go(screen: Screen) { keyboard?.hide(); onDismiss(); nav.push(screen) }
 
     // Results follow the typing, with a short pause so the database is not hit per keystroke.
     LaunchedEffect(q, page) {
@@ -138,8 +149,9 @@ fun SearchScreen(settings: Settings) {
         }
     }
 
-    Column(Modifier.fillMaxSize().appBackground().statusBarsPadding().imePadding()) {
-        ScreenBar("Search", onBack = { nav.pop() })
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).imePadding()) {
+        Text("Search", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 22.dp, bottom = 10.dp))
         OutlinedTextField(
             value = query, onValueChange = { query = it; page = 0 },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).focusRequester(focus),
@@ -154,7 +166,7 @@ fun SearchScreen(settings: Settings) {
             Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("AI overview", style = MaterialTheme.typography.titleSmall)
+                Text("Crux AI overview", style = MaterialTheme.typography.titleSmall)
                 Text(
                     if (hasKey) "Written from your results when you press search" else "Needs an AI key",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -192,12 +204,12 @@ fun SearchScreen(settings: Settings) {
             }
             when {
                 q.length < 2 -> item("hint") { EmptyState("Search your library", "Everything you have synced: video titles, summaries, headlines and AI notes.") }
-                videos.isEmpty() && news.isEmpty() -> item("none") { EmptyState("No matches", "Try a different word, or refresh to sync more.") }
+                videos.isEmpty() && news.isEmpty() -> item("none") { EmptyState("No matches", "Try a different word, or pull down on Crux to sync more.") }
                 else -> {
                     if (videos.isNotEmpty()) {
                         item("vh") { Text("Videos", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp)) }
                         items(videos, key = { "v" + it.id }) { v ->
-                            ResultRow(Icons.Rounded.PlayCircle, v.title, Dates.shortDate(v.publishedAt), v.relevance) { nav.push(Screen.VideoDetail(v.id)) }
+                            ResultRow(Icons.Rounded.PlayCircle, v.title, Dates.shortDate(v.publishedAt), v.relevance) { go(Screen.VideoDetail(v.id)) }
                         }
                     }
                     if (news.isNotEmpty()) {
@@ -205,7 +217,7 @@ fun SearchScreen(settings: Settings) {
                         items(news, key = { "n" + it.id }) { n ->
                             val src = Sources.byId(settings, n.sourceId)?.name ?: n.sourceId
                             ResultRow(Icons.Rounded.Newspaper, n.title, "$src · ${Dates.prettyDay(n.dayKey)}", n.relevance) {
-                                nav.push(Screen.Reader(n.title, n.snippet, "$src · ${n.section} · ${Dates.dateTime(n.publishedAt)}", n.link, n.relevance, n.note))
+                                go(Screen.Reader(n.title, n.snippet, "$src · ${n.section} · ${Dates.dateTime(n.publishedAt)}", n.link, n.relevance, n.note, askId = n.id))
                             }
                         }
                         item("pg") { PaginationBar(page, (newsTotal + size - 1) / size, onPage = { page = it }) }
@@ -213,6 +225,7 @@ fun SearchScreen(settings: Settings) {
                 }
             }
         }
+    }
     }
 }
 

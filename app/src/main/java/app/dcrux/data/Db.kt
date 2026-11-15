@@ -147,6 +147,12 @@ interface TestDao {
 
     @Query("SELECT * FROM tests WHERE id = :id")
     suspend fun get(id: Long): TestRecord?
+
+    @Query("UPDATE tests SET payload = :payload WHERE id = :id")
+    suspend fun setPayload(id: Long, payload: String)
+
+    @Query("DELETE FROM tests WHERE id = :id")
+    suspend fun delete(id: Long)
 }
 
 @Dao
@@ -160,6 +166,9 @@ interface AskDao {
     @Query("SELECT * FROM asks WHERE articleId = :articleId ORDER BY askedAt DESC LIMIT :n")
     suspend fun latest(articleId: String, n: Int): List<Ask>
 
+    @Query("SELECT * FROM asks ORDER BY askedAt DESC")
+    fun observeAll(): Flow<List<Ask>>
+
     @Insert
     suspend fun insert(a: Ask): Long
 
@@ -167,7 +176,7 @@ interface AskDao {
     suspend fun delete(id: Long)
 }
 
-@Database(entities = [Channel::class, Video::class, NewsItem::class, TestRecord::class, Ask::class], version = 2, exportSchema = false)
+@Database(entities = [Channel::class, Video::class, NewsItem::class, TestRecord::class, Ask::class], version = 3, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun channels(): ChannelDao
     abstract fun videos(): VideoDao
@@ -176,6 +185,13 @@ abstract class AppDb : RoomDatabase() {
     abstract fun asks(): AskDao
 
     companion object {
+        /** 2 -> 3 records, with each question, the title of what it was asked on. Existing questions keep an empty title. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `asks` ADD COLUMN `topic` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         /** 1 -> 2 adds the questions asked about articles. Nothing already on the phone is touched. */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -188,6 +204,6 @@ abstract class AppDb : RoomDatabase() {
         }
 
         fun open(context: Context): AppDb =
-            Room.databaseBuilder(context, AppDb::class.java, "dcrux.db").addMigrations(MIGRATION_1_2).build()
+            Room.databaseBuilder(context, AppDb::class.java, "dcrux.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
     }
 }

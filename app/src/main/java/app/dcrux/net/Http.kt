@@ -34,7 +34,8 @@ object Http {
 
     /** For server-sent events: no overall deadline, generous gap between chunks. */
     val streaming: OkHttpClient by lazy {
-        client.newBuilder().readTimeout(240, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build()
+        // Page photos can take a while to upload on a slow connection, hence the patient write timeout.
+        client.newBuilder().readTimeout(240, TimeUnit.SECONDS).writeTimeout(120, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build()
     }
 
     suspend fun getText(url: String, headers: Map<String, String> = emptyMap()): String = withContext(Dispatchers.IO) {

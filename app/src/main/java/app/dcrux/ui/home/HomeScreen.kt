@@ -37,6 +37,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import app.dcrux.net.WeatherRepo
+import app.dcrux.ui.theme.LocalExtra
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import java.util.Date
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
+import java.util.Locale
+import kotlin.math.roundToInt
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -101,7 +119,7 @@ import app.dcrux.ui.theme.BrandColors
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun HomeTab(settings: Settings, activity: MainActivity) {
     val context = LocalContext.current
@@ -134,44 +152,80 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
         }
     }
 
+    // The sync line appears only while a sync runs, says "Synced" for a moment, and then steps aside.
+    var justSynced by remember { mutableStateOf(false) }
+    var pulled by remember { mutableStateOf(false) }
+    var wasRunning by remember { mutableStateOf(sync.running) }
+    LaunchedEffect(sync.running) {
+        if (wasRunning && !sync.running) {
+            pulled = false
+            if (sync.error == null) { justSynced = true; delay(2800); justSynced = false }
+        }
+        wasRunning = sync.running
+    }
+    LaunchedEffect(shareMessage) { if (shareMessage != null && shareMessage != "Adding the shared link") { delay(5000); shareMessage = null } }
+    var errorHidden by remember(sync.error, sync.finishedAt) { mutableStateOf(false) }
+
+    // Weather for the header: refreshed when it is more than half an hour old.
+    var weatherOpen by remember { mutableStateOf(false) }
+    var weatherTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(settings.place, weatherTick) {
+        val place = settings.place ?: return@LaunchedEffect
+        val fresh = settings.weather?.let { System.currentTimeMillis() - it.at < 30 * 60_000L } == true
+        if (fresh && weatherTick == 0) return@LaunchedEffect
+        // Runs in the app's scope so that leaving the screen mid-way does not lose the answer; one retry for a slow start.
+        g.scope.launch {
+            val got = runCatching { g.weather.fetch(place) }.getOrNull() ?: run { delay(4000); runCatching { g.weather.fetch(place) }.getOrNull() }
+            if (got != null && g.prefs.get().place == place) g.prefs.setWeather(got)
+        }
+    }
+    if (weatherOpen) WeatherSheet(settings) { weatherOpen = false }
+
+    PullToRefreshBox(
+        isRefreshing = pulled && sync.running,
+        onRefresh = {
+            weatherTick++
+            if (channels?.isEmpty() == true) askChannel = true
+            else { pulled = true; g.sync.syncNow() }
+        },
+        modifier = Modifier.fillMaxSize().statusBarsPadding(),
+    ) {
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding(),
+        Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + bottomBarInset()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item("bar") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    TabTitle("DCrux")
-                    Text(Dates.longDay(System.currentTimeMillis()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                IconButton(onClick = { nav.push(Screen.Search) }) { Icon(Icons.Rounded.Search, "Search") }
-                val spin = rememberInfiniteTransition(label = "spin")
-                val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "a")
-                FilledTonalIconButton(onClick = { if (channels?.isEmpty() == true) askChannel = true else g.sync.syncNow() }, enabled = !sync.running) {
-                    Icon(Icons.Rounded.Refresh, "Refresh now", Modifier.rotate(if (sync.running) angle else 0f))
-                }
+                TabTitle("DCrux", Modifier.weight(1f))
+                FilledTonalIconButton(onClick = { nav.searchOpen = true }) { Icon(Icons.Rounded.Search, "Search") }
             }
         }
 
+        item("today") { TodayCard(settings) { weatherOpen = true } }
+
         item("status") {
-            Column(Modifier.animateContentSize()) {
-                if (sync.running) {
-                    LinearWavyProgressIndicator(Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(6.dp))
-                    Text(sync.message, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Sync, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Synced ${Dates.ago(settings.lastSync)} · " + if (settings.dailySync) "daily auto-sync on" else "auto-sync off",
-                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    sync.error?.let {
-                        Spacer(Modifier.height(4.dp))
-                        Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+            val showError = sync.error != null && !errorHidden && !sync.running
+            AnimatedVisibility(
+                sync.running || justSynced || showError || shareMessage != null,
+                enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut(),
+            ) {
+                Column(Modifier.animateContentSize()) {
+                    when {
+                        sync.running -> {
+                            LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(6.dp))
+                            Text(sync.message.ifBlank { "Syncing" }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                        showError -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(sync.error.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                            IconButton(onClick = { errorHidden = true }, modifier = Modifier.size(32.dp)) { Icon(Icons.Rounded.Close, "Dismiss", Modifier.size(16.dp)) }
+                        }
+                        justSynced -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.CheckCircle, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Synced", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                     shareMessage?.let {
                         Spacer(Modifier.height(4.dp))
@@ -189,8 +243,6 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
             if (pending) CruxCard(color = MaterialTheme.colorScheme.primaryContainer) { UpdatePanel(Modifier.padding(16.dp), banner = true) }
         }
 
-        item("spark") { DailySpark() }
-
         val list = channels
         when {
             list == null -> {}
@@ -205,25 +257,99 @@ fun HomeTab(settings: Settings, activity: MainActivity) {
             }
         }
     }
+    }
 }
 
-/** What to look for on Wikimedia Commons for each kind of picture. */
-private val SceneQueries = listOf(
-    "sunrise mountain landscape", "ocean sunset horizon", "starry night sky milky way",
-    "misty forest morning", "sand dunes desert sunset", "aurora borealis night",
-)
-
-/** Five lines of motivation a day, each on its own picture; both change every day. */
+/**
+ * Today in one card: the day, date and time, the weather where you are, and the day's lines of
+ * motivation, all over a small landscape that follows the hour, the weather and the temperature.
+ * Tapping it slides the weather details up; swiping changes the quote.
+ */
 @Composable
-private fun DailySpark() {
-    val day = remember(Dates.dayKey()) { Dates.dayOfEpoch().toInt() }
-    val slides = remember(day) {
-        Quotes.today().map { q ->
-            val scene = Quotes.all.indexOf(q).coerceAtLeast(0)
-            Slide("\u201C${q.text}\u201D", q.source, SceneQueries[scene.mod(SceneQueries.size)], scene)
+private fun TodayCard(settings: Settings, onOpen: () -> Unit) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
+    val place = settings.place
+    val w = settings.weather
+    val alerts = remember(w) { w?.let { WeatherRepo.advisories(it) }.orEmpty() }
+    val hour = remember(now) { Calendar.getInstance().let { it.get(Calendar.HOUR_OF_DAY) + it.get(Calendar.MINUTE) / 60f } }
+    val quotes = remember(Dates.dayKey(now)) { Quotes.today() }
+    val pager = rememberPagerState { quotes.size }
+    LaunchedEffect(quotes) {
+        while (true) {
+            delay(7000)
+            if (!pager.isScrollInProgress && quotes.size > 1) pager.animateScrollToPage((pager.currentPage + 1) % quotes.size, animationSpec = tween(700))
         }
     }
-    PhotoCarousel("Daily spark", Icons.Rounded.Bolt, slides, day)
+    val ink = Color.White
+    val shadow = Shadow(Color.Black.copy(alpha = 0.5f), Offset(0f, 2f), 8f)
+    Box(Modifier.fillMaxWidth().height(264.dp).clip(RoundedCornerShape(32.dp)).clickable(onClick = onOpen)) {
+        WeatherScene(w?.code, w?.temp, w?.let { if (it.isDay < 0) null else it.isDay == 1 }, hour, Modifier.fillMaxSize())
+        // A soft veil so the words read on any sky, heavier at the foot where the quote sits.
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Black.copy(alpha = 0.08f), Color.Black.copy(alpha = 0.56f)))))
+        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp)) {
+            Row {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        SimpleDateFormat("EEEE", Locale.getDefault()).format(Date(now)).uppercase(Locale.getDefault()) + "  ·  " + Dates.time(now),
+                        style = MaterialTheme.typography.labelLarge.copy(shadow = shadow), color = ink.copy(alpha = 0.92f),
+                    )
+                    Text(SimpleDateFormat("d MMMM yyyy", Locale.getDefault()).format(Date(now)), style = MaterialTheme.typography.titleLarge.copy(shadow = shadow), color = ink)
+                }
+                if (place == null) {
+                    Row(Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.32f)).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.LocationOn, null, Modifier.size(16.dp), tint = ink)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Set your city", style = MaterialTheme.typography.labelLarge, color = ink)
+                    }
+                } else Column(horizontalAlignment = Alignment.End) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (w != null) {
+                            Icon(weatherIcon(w.code), WeatherRepo.describe(w.code), Modifier.size(24.dp), tint = ink)
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(if (w != null) "${w.temp.roundToInt()}°" else "–°", style = MaterialTheme.typography.headlineMedium.copy(shadow = shadow), color = ink)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.LocationOn, null, Modifier.size(13.dp), tint = ink.copy(alpha = 0.9f))
+                        Spacer(Modifier.width(2.dp))
+                        Text(place.name, style = MaterialTheme.typography.labelLarge.copy(shadow = shadow), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (w != null) Text(
+                        "${WeatherRepo.describe(w.code)} · feels ${w.feels.roundToInt()}°",
+                        style = MaterialTheme.typography.labelMedium.copy(shadow = shadow), color = ink.copy(alpha = 0.9f),
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            HorizontalPager(pager, Modifier.fillMaxWidth(), pageSpacing = 16.dp, verticalAlignment = Alignment.Bottom) { i ->
+                val q = quotes[i]
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        "\u201C${q.text}\u201D", style = MaterialTheme.typography.titleMedium.copy(shadow = shadow), color = ink,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(q.source, style = MaterialTheme.typography.labelMedium.copy(shadow = shadow), color = ink.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    quotes.indices.forEach { i ->
+                        Box(Modifier.height(5.dp).width(if (i == pager.currentPage) 18.dp else 5.dp).clip(CircleShape).background(ink.copy(alpha = if (i == pager.currentPage) 0.95f else 0.45f)))
+                    }
+                }
+                if (alerts.isNotEmpty()) {
+                    val x = LocalExtra.current
+                    Row(Modifier.clip(CircleShape).background(x.mid).padding(horizontal = 9.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.WarningAmber, null, Modifier.size(13.dp), tint = x.onMid)
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (alerts.size == 1) alerts.first().title else "${alerts.size} alerts", style = MaterialTheme.typography.labelSmall, color = x.onMid, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -288,7 +414,7 @@ private fun ChannelCard(channel: Channel, settings: Settings, startExpanded: Boo
                 Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp)) {
                     if (videos.isEmpty()) {
                         Text(
-                            "No videos synced yet. Tap refresh.", Modifier.padding(12.dp),
+                            "No videos synced yet. Pull down to sync.", Modifier.padding(12.dp),
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

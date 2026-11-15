@@ -38,6 +38,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import app.dcrux.ui.news.AskSheet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -146,11 +147,16 @@ fun VideoScreen(videoId: String, settings: Settings) {
         }
     }
 
+    // Ask AI about this video: its notes and captions are what the answers rest on.
+    var askOpen by remember { mutableStateOf(false) }
+    if (askOpen && v != null) AskSheet(remember(v) { g.ai.topicFor(v) }, "Video · ${Dates.shortDate(v.publishedAt)}") { askOpen = false }
+
     Column(Modifier.fillMaxSize().appBackground().statusBarsPadding()) {
         ScreenBar("Video crux", onBack = { nav.pop() }) {
             if (text != null && v != null) {
+                IconButton(onClick = { askOpen = true }) { Icon(Icons.Rounded.AutoAwesome, "Ask Crux AI", tint = MaterialTheme.colorScheme.primary) }
                 ReadModeButton(onClick = {
-                    nav.push(Screen.Reader(v.title, text, (if (detailed) "Detailed notes" else "Summary") + " · " + Dates.shortDate(v.publishedAt), v.watchUrl, v.relevance))
+                    nav.push(Screen.Reader(v.title, text, (if (detailed) "Detailed notes" else "Summary") + " · " + Dates.shortDate(v.publishedAt), v.watchUrl, v.relevance, askId = "video:${v.id}"))
                 })
             }
             IconButton(onClick = {
@@ -227,7 +233,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                                 Spacer(Modifier.height(8.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        "Written by AI. Check important facts against the video.",
+                                        "Written by Crux AI. Check important facts against the video.",
                                         Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     TextButton(onClick = { generate(detailed) }) {
@@ -251,7 +257,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                             }
                             "run" -> CruxLoader(
                                 job?.stage ?: "Working",
-                                if ((job?.chars ?: 0) > 0) "${job?.chars} characters so far" else "AI is reading and thinking",
+                                if ((job?.chars ?: 0) > 0) "${job?.chars} characters so far" else "Crux AI is reading and thinking",
                             )
                             "error" -> {
                                 Text("Could not write this", style = MaterialTheme.typography.titleMedium)
@@ -263,7 +269,7 @@ fun VideoScreen(videoId: String, settings: Settings) {
                             "nokey" -> {
                                 Text("Add an AI key", style = MaterialTheme.typography.titleMedium)
                                 Spacer(Modifier.height(4.dp))
-                                Text("Summaries are written by AI with your own key, stored only on this phone.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Summaries are written by Crux AI with your own key, stored only on this phone.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(12.dp))
                                 FilledTonalButton(onClick = { nav.openSettings() }) { Text("Open Settings") }
                             }

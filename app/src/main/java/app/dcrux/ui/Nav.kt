@@ -23,16 +23,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.dcrux.data.QuizQuestion
+import app.dcrux.data.TestResult
 
 sealed interface Screen {
     data object Tabs : Screen
     data class VideoDetail(val id: String) : Screen
-    data class Reader(val title: String, val body: String, val meta: String = "", val link: String? = null, val relevance: String? = null, val note: String? = null) : Screen
+    data class Reader(val title: String, val body: String, val meta: String = "", val link: String? = null, val relevance: String? = null, val note: String? = null, val askId: String = "") : Screen
     data class Browser(val url: String, val title: String) : Screen
-    data object Search : Screen
     data object About : Screen
-    data class TestRun(val title: String, val exam: String, val difficulty: String, val dayKey: String, val questions: List<QuizQuestion>) : Screen
-    data class TestReview(val id: Long, val fresh: Boolean = false) : Screen
+    /** Everything asked and every test taken, in one list. */
+    data object History : Screen
+    /** [retakeOf] is the history entry being retaken; its score is replaced only by a better one. */
+    data class TestRun(val title: String, val exam: String, val difficulty: String, val dayKey: String, val questions: List<QuizQuestion>, val retakeOf: Long = 0) : Screen
+    /** [shown] is a result to display that is not the stored one (a retake that did not beat the earlier score). */
+    data class TestReview(val id: Long, val fresh: Boolean = false, val shown: TestResult? = null, val note: String = "") : Screen
+    /** The Mains attempt in progress; its state lives in the MainsStore so it survives the app being closed. */
+    data object MainsRun : Screen
     data class PdfPreview(val id: Long) : Screen
 }
 
@@ -42,6 +48,10 @@ class Nav {
     var tab by mutableIntStateOf(0)
     var lastWasPop by mutableStateOf(false)
         private set
+
+    /** Search slides up over whatever screen is showing; the last query is kept for the next time. */
+    var searchOpen by mutableStateOf(false)
+    var searchQuery by mutableStateOf("")
 
     val current: Screen get() = stack.last()
 

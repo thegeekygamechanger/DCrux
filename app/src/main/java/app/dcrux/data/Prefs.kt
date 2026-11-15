@@ -43,6 +43,10 @@ data class Settings(
     val blockAds: Boolean = true,
     val autoUpdate: Boolean = true,
     val lastUpdateCheck: Long = 0,
+    val tourDone: Boolean = false,
+    /** The city the home header shows weather for; null until the user picks one or allows location. */
+    val place: Place? = null,
+    val weather: Weather? = null,
 )
 
 class Prefs(private val context: Context) {
@@ -72,6 +76,9 @@ class Prefs(private val context: Context) {
         val blockAds = booleanPreferencesKey("block_ads")
         val autoUpdate = booleanPreferencesKey("auto_update")
         val lastUpdateCheck = longPreferencesKey("last_update_check")
+        val tourDone = booleanPreferencesKey("tour_done")
+        val place = stringPreferencesKey("place")
+        val weather = stringPreferencesKey("weather")
     }
 
     val flow: Flow<Settings> = context.store.data.map { p ->
@@ -102,6 +109,9 @@ class Prefs(private val context: Context) {
             blockAds = p[K.blockAds] ?: d.blockAds,
             autoUpdate = p[K.autoUpdate] ?: d.autoUpdate,
             lastUpdateCheck = p[K.lastUpdateCheck] ?: d.lastUpdateCheck,
+            tourDone = p[K.tourDone] ?: d.tourDone,
+            place = p[K.place]?.let { runCatching { AppJson.decodeFromString<Place>(it) }.getOrNull() },
+            weather = p[K.weather]?.let { runCatching { AppJson.decodeFromString<Weather>(it) }.getOrNull() },
         )
     }
 
@@ -135,6 +145,9 @@ class Prefs(private val context: Context) {
     suspend fun setBlockAds(v: Boolean) = edit { it[K.blockAds] = v }
     suspend fun setAutoUpdate(v: Boolean) = edit { it[K.autoUpdate] = v }
     suspend fun setLastUpdateCheck(v: Long) = edit { it[K.lastUpdateCheck] = v }
+    suspend fun setTourDone(v: Boolean) = edit { it[K.tourDone] = v }
+    suspend fun setPlace(v: Place?) = edit { if (v == null) { it.remove(K.place); it.remove(K.weather) } else { it[K.place] = AppJson.encodeToString(v); it.remove(K.weather) } }
+    suspend fun setWeather(v: Weather) = edit { it[K.weather] = AppJson.encodeToString(v) }
     suspend fun setReaderScale(v: Float) = edit { it[K.readerScale] = (v * 100).toInt() }
 
     suspend fun wipe() {

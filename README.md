@@ -4,9 +4,10 @@ The daily crux of current affairs for UPSC and State PSC aspirants, on your phon
 
 Follow YouTube channels and get each video as readable notes. Read the day's papers with
 every headline scored for your exam, and ask questions about any article. Test yourself on
-the news. Wind down with generated soundscapes.
+the news with Prelims MCQs, or write Mains answers on paper and have them read and marked.
+Wind down with generated soundscapes.
 
-No account. Everything is kept on the device.
+No account. Your data is kept on the device.
 
 Developed by **Harsh Kumar** · [theharshkumar.in](https://theharshkumar.in)
 
@@ -23,15 +24,17 @@ After that the app updates itself: it checks this repository's latest release on
 
 | Area | What you get |
 | --- | --- |
-| **Crux** | Each YouTube channel you add becomes a card with its history by date, paginated. A daily carousel pairs public-domain quotations with openly licensed photos; both change every day. |
+| **Crux** | Each YouTube channel you add becomes a card with its history by date, paginated. The header shows the date and, if you set a city, its temperature and weather alerts. Pull down to sync. The date, time and the day's public-domain quotations sit on one card over a drawn landscape that follows the hour and the weather. |
 | **Video** | YouTube's own player with all its controls, plus a Summary / Detailed toggle written from what is said in the video (its captions), with photos, diagrams and an exam-relevance score. |
 | **Read mode** | Video notes open as a book: a cover with the contents, then one page per topic, turned like paper. Full screen available. |
 | **Papers** | Headlines live from The Hindu, The Indian Express, PIB and more, laid out as newspaper pages. Articles and e-papers open on the publisher's own site in a no-cache in-app browser with an ad blocker and read mode. |
-| **Ask AI** | On any headline, ask about the article in a slide-up sheet. Answers come from the article itself, show the model's thought process when it reasons, and suggest follow-up questions. Every question stays saved with its article. |
-| **Tests** | Multiple-choice tests generated from the day's headlines for the exam and difficulty you choose. Results earn stars, are stored encrypted, and can be viewed or shared as a PDF made in memory and never saved. |
+| **Ask Crux AI** | On any headline, on any video's notes and in read mode (full screen too), ask a question in a slide-up sheet. The answer comes from the article or video first; when that does not cover it, Crux AI searches the web and lists the pages it used, and it says so when it cannot confirm an answer. Answers can include diagrams and pictures and suggest follow-up questions. Every question stays saved with what it was asked on. |
+| **History** | Settings → History lists every question asked (when, and on which video or article) and every test, with filters and pages. |
+| **Tests: Prelims** | Multiple-choice tests generated from the day's headlines for the exam and difficulty you choose, each question with a relevance score. Retake a test to beat your score. Results earn stars, are stored encrypted, and can be viewed or shared as a PDF made in memory and never saved. |
+| **Tests: Mains** | Descriptive questions set from the day's news. Write on paper against the clock, photograph or upload the pages, and Crux AI reads the handwriting and marks it like a mentor: a marked copy (each section with a tick or cross and a short remark), marks by criterion, mistakes quoted from your answer, what to fix first, a topper's outline and time advice. The reading it marked from is always shown. |
 | **Mind Flow** | Fifteen soothing sounds (rain, ocean, fire, binaural tones and more), synthesised on the phone in real time. Mix them, set a sleep timer, control playback from the notification. |
-| **Search** | Search everything synced, with an optional AI overview written only from the matching results. |
-| **Privacy** | App lock with biometrics and a PIN. Backups are off, so nothing leaves the phone. |
+| **Search** | Slides up over any screen and searches everything synced, with an optional AI overview written only from the matching results. |
+| **Privacy** | App lock with biometrics and a PIN. Backups are off. No analytics. Location is optional and city-level only. The in-app Privacy sheet lists exactly what leaves the phone. |
 
 Kotlin, Jetpack Compose, Material 3 Expressive.
 
@@ -39,7 +42,9 @@ Kotlin, Jetpack Compose, Material 3 Expressive.
 
 - **No invented news.** Headlines, snippets and links come verbatim from the publishers' feeds. The AI only rates and annotates what it is given, and is told to say so when the material is thin.
 - **Summaries are of the video itself.** They are written from the video's captions, loaded through the official player. When a video has no captions the app says so instead of summarising its description.
-- **One score, out of 100.** Exam relevance is the sum of four parts (syllabus fit 40, likelihood of a question 30, depth 20, currency 10), built the same way for videos and headlines.
+- **One score, out of 100.** Exam relevance is the sum of four parts (syllabus fit 40, likelihood of a question 30, depth 20, currency 10), built the same way for videos, headlines and test questions.
+- **Mains marking shows its working.** The AI first copies out what it can read from the pages, writing `[illegible]` where it cannot, and marks only that. Marks are the sum of five fixed criteria, capped in the app, and marked strictly. Time advice uses the time the app recorded, against the UPSC pace of 250 marks in three hours. It is an estimate to learn from, not an official score.
+- **Weather alerts are labelled for what they are.** They are worked out from Open-Meteo forecast data with fixed thresholds and are not official warnings.
 - **Sync does not depend on one door.** YouTube's channel feed goes missing now and then; DCrux then reads the channel's own Videos and Live pages instead of reporting an error.
 - **Publishers keep their content.** DCrux stores a headline index (headline, short feed snippet, link). Full articles and e-papers are read on the publisher's site; paid e-papers need your own subscription.
 - **YouTube plays in YouTube's player.** DCrux adds no ads of its own and does not strip YouTube's.
@@ -107,8 +112,9 @@ then creates the release and uploads `DCrux-<version>.apk`.
 ```
 app/src/main/java/app/dcrux/
   data/      Room database, settings, Keystore-backed secure store
-  net/       YouTube and news sources, Wikimedia Commons photos, HTTP
+  net/       YouTube and news sources, Wikimedia Commons photos, weather, HTTP
   ai/        Claude Messages API client (streaming), prompts, background keep-alive
+  mains/     A Mains attempt in progress: timers, page photos, evaluation
   sync/      Daily WorkManager sync and manual refresh
   update/    In-app updates from GitHub releases
   audio/     Procedural sound engine and playback service

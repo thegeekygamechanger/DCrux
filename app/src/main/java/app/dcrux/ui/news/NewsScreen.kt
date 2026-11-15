@@ -114,7 +114,7 @@ fun NewsTab(settings: Settings) {
             Column(Modifier.weight(1f)) {
                 TabTitle("Papers")
             }
-            IconButton(onClick = { nav.push(Screen.Search) }) { Icon(Icons.Rounded.Search, "Search") }
+            IconButton(onClick = { nav.searchOpen = true }) { Icon(Icons.Rounded.Search, "Search") }
             IconButton(onClick = { showEpapers = true }) { Icon(Icons.AutoMirrored.Rounded.MenuBook, "E-papers") }
             if (sync.running) LoadingIndicator(Modifier.size(40.dp))
             else FilledTonalIconButton(onClick = { g.sync.syncNow() }) { Icon(Icons.Rounded.Refresh, "Refresh now") }
@@ -312,11 +312,11 @@ private fun PaperSheet(source: NewsSource, day: String, page: Int, pageCount: In
                     val asked by remember(n.id) { g.db.asks().count(n.id) }.collectAsState(initial = 0)
                     FilledTonalButton(onClick = { askAbout = n }, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)) {
                         Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
-                        Text(if (asked > 0) "Ask AI · $asked" else "Ask AI")
+                        Text(if (asked > 0) "Ask Crux AI · $asked" else "Ask Crux AI")
                     }
                     Spacer(Modifier.weight(1f))
                     ReadModeButton(onClick = {
-                        nav.push(Screen.Reader(n.title, n.snippet, "${source.name} · ${n.section} · ${Dates.dateTime(n.publishedAt)}", n.link, n.relevance, n.note))
+                        nav.push(Screen.Reader(n.title, n.snippet, "${source.name} · ${n.section} · ${Dates.dateTime(n.publishedAt)}", n.link, n.relevance, n.note, askId = n.id))
                     })
                     IconButton(onClick = { nav.push(Screen.Browser(n.link, source.name)) }) {
                         Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Read at the source", tint = ink.copy(alpha = 0.8f))

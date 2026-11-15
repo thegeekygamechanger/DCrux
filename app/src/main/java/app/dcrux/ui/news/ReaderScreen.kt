@@ -51,6 +51,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -153,12 +156,30 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
         }
         onDispose { activity?.window?.let { WindowCompat.getInsetsController(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) } }
     }
-    BackHandler(enabled = full) { full = false }
+    // Ask AI about what is being read; available in full screen too.
+    val canAsk = remember { g.secure.hasApiKey() || g.hasBuiltInKey }
+    var askOpen by remember { mutableStateOf(false) }
+    val topic = remember(screen) { g.ai.topicForText(screen.askId.ifBlank { "read:" + screen.title.hashCode() }, screen.title, screen.meta, screen.body, screen.link) }
+    if (askOpen) AskSheet(topic, screen.meta.substringBefore(" · ").ifBlank { "Read mode" }) { askOpen = false }
+
+    // Leaving full screen part-way through a book asks first: the point of full screen is to finish what you opened.
+    var pagesLeft by remember { mutableIntStateOf(0) }
+    var askExit by remember { mutableStateOf(false) }
+    fun leaveFull() { if (pagesLeft > 0) askExit = true else full = false }
+    BackHandler(enabled = full) { leaveFull() }
+    if (askExit) AlertDialog(
+        onDismissRequest = { askExit = false },
+        title = { Text("Finish before you leave?") },
+        text = { Text("You have $pagesLeft ${if (pagesLeft == 1) "page" else "pages"} left. Stay in full screen and complete today's target.") },
+        confirmButton = { Button(onClick = { askExit = false }) { Text("Keep reading") } },
+        dismissButton = { TextButton(onClick = { askExit = false; full = false }) { Text("Exit full screen") } },
+    )
 
     CompositionLocalProvider(LocalContentColor provides ink) {
         Box(Modifier.fillMaxSize().background(desk)) {
             Column(if (full) Modifier.fillMaxSize().padding(vertical = 8.dp) else Modifier.fillMaxSize().statusBarsPadding()) {
                 if (!full) ScreenBar("Read mode", onBack = { nav.pop() }) {
+                    if (canAsk) IconButton(onClick = { askOpen = true }) { Icon(Icons.Rounded.AutoAwesome, "Ask Crux AI") }
                     IconButton(onClick = { full = true }) { Icon(Icons.Rounded.Fullscreen, "Full screen") }
                     IconButton(onClick = { scope.launch { g.prefs.setReaderScale((scale - 0.1f).coerceAtLeast(0.8f)) } }) { Icon(Icons.Rounded.TextDecrease, "Smaller text") }
                     IconButton(onClick = { scope.launch { g.prefs.setReaderScale((scale + 0.1f).coerceAtMost(1.6f)) } }) { Icon(Icons.Rounded.TextIncrease, "Larger text") }
@@ -176,6 +197,7 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
                 } else {
                     val pageCount = topics.size + 1
                     val pager = rememberPagerState { pageCount }
+                    LaunchedEffect(pager.currentPage) { pagesLeft = pageCount - 1 - pager.currentPage }
                     // The hint shows every time read mode opens; it goes away on Skip, on the first turn, or by itself.
                     var hint by remember { mutableStateOf(true) }
                     // The reader reopens on the page it was left at, so "a page other than the first" says
@@ -226,9 +248,15 @@ fun ReaderScreen(screen: Screen.Reader, settings: Settings) {
                     )
                 }
             }
+            if (full && canAsk) {
+                FilledTonalIconButton(
+                    onClick = { askOpen = true },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 68.dp).size(40.dp).alpha(0.85f),
+                ) { Icon(Icons.Rounded.AutoAwesome, "Ask Crux AI") }
+            }
             if (full) {
                 FilledTonalIconButton(
-                    onClick = { full = false },
+                    onClick = { leaveFull() },
                     modifier = Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 18.dp).size(40.dp).alpha(0.85f),
                 ) { Icon(Icons.Rounded.FullscreenExit, "Leave full screen") }
             }

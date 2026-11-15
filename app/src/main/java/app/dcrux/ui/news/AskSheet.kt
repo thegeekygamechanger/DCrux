@@ -74,11 +74,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.dcrux.data.Dates
 import app.dcrux.data.NewsItem
+import app.dcrux.ai.AiRepo
+import app.dcrux.ui.LocalNav
+import app.dcrux.ui.Screen
+import androidx.compose.material.icons.rounded.Public
 import app.dcrux.graph
 import app.dcrux.ui.components.Markdown
 import kotlinx.coroutines.launch
 
-private val starters = listOf(
+private val articleStarters = listOf(
     "Why is this in the news?",
     "Explain it for my exam",
     "Key terms, explained",
@@ -86,38 +90,57 @@ private val starters = listOf(
     "Give me the background",
 )
 
-/**
- * Ask AI about one article. Slides up over the paper; every question and answer about this
- * article is kept and shown here again the next time it is opened.
- */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+private val videoStarters = listOf(
+    "Explain this simply",
+    "What could be asked on this?",
+    "Key terms, explained",
+    "Show it as a diagram",
+    "Give me a way to remember it",
+)
+
+/** Ask AI about one article. */
 @Composable
 fun AskSheet(item: NewsItem, sourceName: String, onDismiss: () -> Unit) {
     val g = LocalContext.current.graph
+    AskSheet(remember(item.id) { g.ai.topicFor(item, sourceName) }, "$sourceName · ${Dates.prettyDay(item.dayKey)}", onDismiss)
+}
+
+/**
+ * Ask AI about whatever is being read or watched. Slides up over the page; every question and
+ * answer on that topic is kept and shown here again the next time it is opened. Only answers are
+ * shown: how the model reasoned stays out of sight.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun AskSheet(topic: AiRepo.AskTopic, subtitle: String, onDismiss: () -> Unit) {
+    val g = LocalContext.current.graph
+    val nav = LocalNav.current
     val scope = rememberCoroutineScope()
-    val history by remember(item.id) { g.db.asks().forArticle(item.id) }.collectAsState(initial = emptyList())
+    val id = topic.id
+    val video = topic.kind == "video"
+    val history by remember(id) { g.db.asks().forArticle(id) }.collectAsState(initial = emptyList())
     val jobs by g.ai.asking.collectAsState()
-    val job = jobs[item.id]
-    var input by rememberSaveable(item.id) { mutableStateOf("") }
+    val job = jobs[id]
+    var input by rememberSaveable(id) { mutableStateOf("") }
     val list = rememberLazyListState()
     val ready = remember { g.secure.hasApiKey() || g.hasBuiltInKey }
     val busy = job != null && job.error == null
 
     fun send(question: String) {
         if (question.isBlank() || busy) return
-        g.ai.ask(item, sourceName, question)
+        g.ai.ask(topic, question)
         input = ""
     }
+    fun openSource(url: String) { onDismiss(); nav.push(Screen.Browser(url, "Source")) }
 
-    // When a question is asked, bring it to the top of the sheet and leave it there: the thought
-    // process and the answer then grow downward where they can be read from the start, and the
-    // view does not jump while text is streaming in.
+    // When a question is asked, bring it to the top of the sheet and leave it there: the answer then
+    // grows downward where it can be read from the start, and the view does not jump while text streams in.
     LaunchedEffect(job?.question) {
         if (job != null) list.animateScrollToItem(history.size)
     }
     // On opening, show the latest saved exchange.
-    LaunchedEffect(item.id) {
-        val saved = g.db.asks().latest(item.id, 1)
+    LaunchedEffect(id) {
+        val saved = g.db.asks().latest(id, 1)
         if (saved.isNotEmpty() && job == null) list.scrollToItem((history.size - 1).coerceAtLeast(0))
     }
 
@@ -127,11 +150,11 @@ fun AskSheet(item: NewsItem, sourceName: String, onDismiss: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
-                    Text("Ask AI", style = MaterialTheme.typography.headlineSmall)
+                    Text("Ask Crux AI", style = MaterialTheme.typography.headlineSmall)
                 }
-                Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                Text(topic.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                 Text(
-                    "$sourceName · ${Dates.prettyDay(item.dayKey)}" + if (history.isNotEmpty()) " · ${history.size} asked" else "",
+                    subtitle + if (history.isNotEmpty()) " · ${history.size} asked" else "",
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -143,8 +166,8 @@ fun AskSheet(item: NewsItem, sourceName: String, onDismiss: () -> Unit) {
                 if (history.isEmpty() && job == null) {
                     item("empty") {
                         Text(
-                            if (ready) "Ask anything about this article. Answers come from the article itself, and your questions stay saved here."
-                            else "Ask AI needs an AI key. Add one in Settings.",
+                            if (ready) "Ask any question or doubt about this ${if (video) "video" else "article"}. Answers come from it first; when it does not cover your question, Crux AI searches the web and shows its sources. Your questions stay saved here."
+                            else "Ask Crux AI needs an AI key. Add one in Settings.",
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -152,32 +175,31 @@ fun AskSheet(item: NewsItem, sourceName: String, onDismiss: () -> Unit) {
                 items(history, key = { it.id }) { a ->
                     Column {
                         Exchange(a.question, Dates.dateTime(a.askedAt), onDelete = { scope.launch { g.db.asks().delete(a.id) } }) {
-                            Thought(a.thinking, live = false)
-                            Markdown(a.answer)
+                            Markdown(g.ai.answerOnly(a.answer))
+                            Sources(g.ai.sourcesOf(a.answer), ::openSource)
                         }
                         // Suggested next questions belong to the latest answer only.
                         if (a.id == history.last().id && job == null) FollowUps(a.followups.lines().filter { it.isNotBlank() }, enabled = ready) { send(it) }
                     }
                 }
                 // Shown only until its saved copy is in the history above (never both at once).
-                if (job != null && history.none { it.question == job.question && job.error == null && job.text.isNotBlank() && it.answer == g.ai.answerOnly(job.text) }) {
+                if (job != null && history.none { it.question == job.question && job.error == null && job.text.isNotBlank() && g.ai.answerOnly(it.answer) == g.ai.answerOnly(job.text) }) {
                     item("live") {
                         Exchange(job.question, "now", onDelete = null) {
                             when {
                                 job.error != null -> {
                                     Text(job.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                                     Row {
-                                        TextButton(onClick = { g.ai.clearAsk(item.id); g.ai.ask(item, sourceName, job.question) }) { Text("Try again") }
-                                        TextButton(onClick = { g.ai.clearAsk(item.id) }) { Text("Dismiss") }
+                                        TextButton(onClick = { g.ai.clearAsk(id); g.ai.ask(topic, job.question) }) { Text("Try again") }
+                                        TextButton(onClick = { g.ai.clearAsk(id) }) { Text("Dismiss") }
                                     }
                                 }
                                 else -> {
-                                    Thought(job.thinking, live = job.text.isBlank())
                                     val shown = g.ai.answerOnly(job.text)
                                     if (shown.isBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
                                         LoadingIndicator(Modifier.size(36.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text(if (job.thinking.isBlank()) "Reading the article" else "Working it out", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(if (job.searching) "Searching the web" else if (job.thinking.isBlank()) (if (video) "Going through the video" else "Reading the article") else "Working it out", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     } else Markdown(shown)
                                 }
                             }
@@ -187,12 +209,12 @@ fun AskSheet(item: NewsItem, sourceName: String, onDismiss: () -> Unit) {
             }
 
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                starters.forEach { s -> AssistChip(onClick = { send(s) }, enabled = ready && !busy, label = { Text(s) }, shape = CircleShape) }
+                (if (video) videoStarters else articleStarters).forEach { s -> AssistChip(onClick = { send(s) }, enabled = ready && !busy, label = { Text(s) }, shape = CircleShape) }
             }
             Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), enabled = ready,
-                    shape = RoundedCornerShape(26.dp), maxLines = 4, placeholder = { Text("Ask about this article") },
+                    shape = RoundedCornerShape(26.dp), maxLines = 4, placeholder = { Text(if (video) "Ask about this video" else "Ask about this article") },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { send(input) }),
                 )
                 Spacer(Modifier.width(10.dp))
@@ -234,32 +256,24 @@ private fun Exchange(question: String, whenText: String, onDelete: (() -> Unit)?
     }
 }
 
-/**
- * The model's own summary of how it reasoned. While the answer is still coming it is open and
- * pulsing; afterwards it folds to one line that opens on tap.
- */
+/** The web pages an answer rests on, when it had to look beyond the article or video. Each opens in the in-app browser. */
 @Composable
-private fun Thought(text: String, live: Boolean) {
-    if (text.isBlank()) return
-    var open by rememberSaveable(text.length < 40) { mutableStateOf(false) }
-    val pulse = rememberInfiniteTransition(label = "thought")
-    val glow by pulse.animateFloat(0.45f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "glow")
-    val turn by animateFloatAsState(if (open || live) 180f else 0f, label = "turn")
-    Column(
-        Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-            .clickable(enabled = !live) { open = !open }.animateContentSize().padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Psychology, null, Modifier.size(18.dp).graphicsLayer { alpha = if (live) glow else 1f }, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(8.dp))
-            Text(if (live) "Thinking it through" else "Thought process", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            Icon(Icons.Rounded.ExpandMore, if (open) "Hide" else "Show", Modifier.size(20.dp).rotate(turn), tint = MaterialTheme.colorScheme.primary)
-        }
-        if (open || live) {
-            Text(
-                if (live) text.takeLast(420) else text, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp),
-            )
+private fun Sources(sources: List<Pair<String, String>>, onOpen: (String) -> Unit) {
+    if (sources.isEmpty()) return
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("From the web", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        sources.forEach { (title, url) ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow).clickable { onOpen(url) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Public, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(runCatching { android.net.Uri.parse(url).host }.getOrNull() ?: url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+            }
         }
     }
 }

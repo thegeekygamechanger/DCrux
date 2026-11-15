@@ -54,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -72,8 +73,11 @@ import app.dcrux.ui.mind.MindFlowTab
 import app.dcrux.ui.news.BrowserScreen
 import app.dcrux.ui.news.NewsTab
 import app.dcrux.ui.news.ReaderScreen
-import app.dcrux.ui.news.SearchScreen
+import app.dcrux.ui.news.SearchSheet
+import app.dcrux.ui.home.Tour
+import app.dcrux.ui.tests.MainsRunScreen
 import app.dcrux.ui.settings.AboutScreen
+import app.dcrux.ui.settings.HistoryScreen
 import app.dcrux.ui.settings.SettingsScreen
 import app.dcrux.ui.tests.PdfPreviewScreen
 import app.dcrux.ui.tests.TestReviewScreen
@@ -120,6 +124,15 @@ fun DCruxRoot(activity: MainActivity) {
 private fun AppNav(nav: Nav, settings: Settings, activity: MainActivity) {
     val holder = rememberSaveableStateHolder()
     BackHandler(enabled = nav.stack.size > 1) { nav.pop() }
+    if (nav.searchOpen) SearchSheet(settings) { nav.searchOpen = false }
+    val g = activity.graph
+    val resumeMains by g.mains.resumeNow.collectAsState()
+    LaunchedEffect(resumeMains) {
+        if (resumeMains) {
+            g.mains.resumeNow.value = false
+            if (nav.current != Screen.MainsRun && g.mains.draft.value != null) { nav.tab = 2; nav.push(Screen.MainsRun) }
+        }
+    }
     AnimatedContent(
         targetState = nav.stack.size to nav.current,
         transitionSpec = {
@@ -135,10 +148,11 @@ private fun AppNav(nav: Nav, settings: Settings, activity: MainActivity) {
                 is Screen.VideoDetail -> VideoScreen(screen.id, settings)
                 is Screen.Reader -> ReaderScreen(screen, settings)
                 is Screen.Browser -> BrowserScreen(screen.url, screen.title, settings)
-                Screen.Search -> SearchScreen(settings)
                 Screen.About -> AboutScreen()
+                Screen.History -> HistoryScreen(settings)
                 is Screen.TestRun -> TestRunScreen(screen)
-                is Screen.TestReview -> TestReviewScreen(screen.id, screen.fresh)
+                is Screen.TestReview -> TestReviewScreen(screen)
+                Screen.MainsRun -> MainsRunScreen()
                 is Screen.PdfPreview -> PdfPreviewScreen(screen.id)
             }
         }
@@ -202,5 +216,8 @@ private fun TabsScreen(nav: Nav, settings: Settings, activity: MainActivity) {
                 }
             }
         }
+
+        // Shown once after install (and once after the update that brought pull-to-sync).
+        if (!settings.tourDone) Tour(onTab = { nav.tab = it })
     }
 }

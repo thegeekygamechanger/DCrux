@@ -80,10 +80,11 @@ val AppShapes = Shapes(
 )
 
 private val Light = lightColorScheme(
-    primary = Color(0xFF5B3BE8), onPrimary = Color.White,
-    primaryContainer = Color(0xFFE6DEFF), onPrimaryContainer = Color(0xFF1A0063),
-    secondary = Color(0xFFB4236A), onSecondary = Color.White,
-    secondaryContainer = Color(0xFFFFD9E4), onSecondaryContainer = Color(0xFF3E0020),
+    primary = Color(0xFF3F4BC4), onPrimary = Color.White,
+    primaryContainer = Color(0xFFDFE1FF), onPrimaryContainer = Color(0xFF0B1463),
+    // Quiet slate for chips, toggles and tonal buttons, so a selected control never shouts.
+    secondary = Color(0xFF565B71), onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE1E3F2), onSecondaryContainer = Color(0xFF191C2C),
     tertiary = Color(0xFF006B5F), onTertiary = Color.White,
     tertiaryContainer = Color(0xFFA6F2E3), onTertiaryContainer = Color(0xFF00201C),
     background = Color(0xFFFCF8FF), onBackground = Color(0xFF1C1B20),
@@ -97,10 +98,10 @@ private val Light = lightColorScheme(
 )
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFFC9BEFF), onPrimary = Color(0xFF2C0F9E),
-    primaryContainer = Color(0xFF4324C9), onPrimaryContainer = Color(0xFFE6DEFF),
-    secondary = Color(0xFFFFB0C9), onSecondary = Color(0xFF650033),
-    secondaryContainer = Color(0xFF8E0F4B), onSecondaryContainer = Color(0xFFFFD9E4),
+    primary = Color(0xFFBCC2FF), onPrimary = Color(0xFF1A2478),
+    primaryContainer = Color(0xFF323C9E), onPrimaryContainer = Color(0xFFDFE1FF),
+    secondary = Color(0xFFC1C5DC), onSecondary = Color(0xFF2B2F42),
+    secondaryContainer = Color(0xFF3A3F54), onSecondaryContainer = Color(0xFFE1E3F2),
     tertiary = Color(0xFF6FDBC9), onTertiary = Color(0xFF003731),
     tertiaryContainer = Color(0xFF005047), onTertiaryContainer = Color(0xFFA6F2E3),
     background = Color(0xFF131218), onBackground = Color(0xFFE5E1E9),
@@ -113,7 +114,8 @@ private val Dark = darkColorScheme(
     error = Color(0xFFFFB4AB), errorContainer = Color(0xFF93000A), onErrorContainer = Color(0xFFFFDAD6),
 )
 
-val BrandColors = listOf(Color(0xFF5B2BFF), Color(0xFFB42BFF), Color(0xFFFF3D81), Color(0xFFFFA63D))
+/** One calm indigo ramp; used for the few places that carry a gradient (score ring, stats, avatars). */
+val BrandColors = listOf(Color(0xFF2E3A9E), Color(0xFF4553C9), Color(0xFF6A78E0))
 val BrandBrush: Brush get() = Brush.linearGradient(BrandColors)
 
 /** Semantic colours for relevance levels, tuned per theme. */

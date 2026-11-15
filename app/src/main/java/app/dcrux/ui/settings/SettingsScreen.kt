@@ -73,6 +73,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -242,6 +243,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
     fun resetApp() {
         scope.launch {
             MindFlow.stopAll(context)
+            g.mains.discard()
             withContext(Dispatchers.IO) { g.db.clearAllTables() }
             g.prefs.wipe()
             g.secure.wipe()
@@ -550,6 +552,19 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                 }
             }
 
+            item("history") {
+                CruxCard(Modifier.fillMaxWidth(), onClick = { nav.push(Screen.History) }) {
+                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("History", style = MaterialTheme.typography.titleLarge)
+                            Text("Every question you asked and every test, with when and where", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null)
+                    }
+                }
+            }
             item("about") {
                 CruxCard(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer, onClick = { nav.push(Screen.About) }) {
                     Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
