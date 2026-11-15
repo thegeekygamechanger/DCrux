@@ -126,3 +126,12 @@ tasks.register<JavaExec>("syncCheck") {
     args = listOf(layout.buildDirectory.dir("sync-check").get().asFile.path)
     jvmArgs("-Djava.awt.headless=true")
 }
+
+// Pairs a data folder from the command line (see CloudCli.kt): ./gradlew :desktop:cloud -Pcli="<data dir> join <code>"
+tasks.register<JavaExec>("cloud") {
+    group = "verification"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("app.dcrux.desktop.CloudCliKt")
+    args = ((project.findProperty("cli") as String?) ?: "").split(' ').filter { it.isNotBlank() }
+    jvmArgs("-Djava.awt.headless=true")
+}

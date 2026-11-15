@@ -54,8 +54,8 @@ android {
         minSdk = 24
         targetSdk = 36
         // -PtestVersionCode / -PtestVersionName build an older-looking APK for testing in-app updates.
-        versionCode = (project.findProperty("testVersionCode") as String?)?.toInt() ?: 8
-        versionName = (project.findProperty("testVersionName") as String?) ?: "1.3.4"
+        versionCode = (project.findProperty("testVersionCode") as String?)?.toInt() ?: 9
+        versionName = (project.findProperty("testVersionName") as String?) ?: "1.4.0"
         vectorDrawables { useSupportLibrary = true }
         buildConfigField("String", "KA", "\"${masked.first}\"")
         buildConfigField("String", "KB", "\"${masked.second}\"")
