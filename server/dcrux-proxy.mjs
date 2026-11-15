@@ -40,11 +40,18 @@ const cfg = {
   // data.gov.in (the site's public sample key is rationed to a few dozen requests and cannot carry an app).
   // Without it the relay answers "not set up" and the app shows its own estimate instead.
   dataGovKey: env.DATAGOV_API_KEY || '',
+  // data.gov.in refuses connections from outside India. A relay hosted in India can fetch the readings itself
+  // (set this to 1) and share one cached answer per city; anywhere else the relay hands the app the request to
+  // make, and the app, which is in India, fetches the readings directly. The key is then never inside the app
+  // package and can be changed here at any time.
+  aqiServerFetch: env.DCRUX_AQI_SERVER_FETCH === '1',
   // Sync across a person's devices: where their encrypted data is kept. The relay cannot read it (the key
   // never leaves the devices); it only stores and returns it. Unset means sync is not offered.
   syncDir: env.DCRUX_SYNC_DIR || '',
   syncMaxTotal: Number(env.DCRUX_SYNC_MAX_TOTAL_BYTES || 2_000_000_000),
   syncWritesDaily: Number(env.DCRUX_SYNC_WRITES_DAILY || 600),
+  // Devices waiting to be told that their data changed (one idle connection each); beyond this they are asked to poll slowly instead.
+  syncMaxWaiters: Number(env.DCRUX_SYNC_MAX_WAITERS || 20000),
   upstream: env.DCRUX_UPSTREAM || 'https://api.anthropic.com',
 };
 if (!cfg.apiKey || !cfg.appSecret) {
@@ -145,6 +152,19 @@ function upstreamRequest(method, path, headers, body, onResponse, onError) {
 }
 
 let modelsCache = { at: 0, body: null };
+
+// Real-time sync without polling: a device asks "tell me when version N is no longer the latest" and the answer is
+// held back until that happens (or about 50 seconds pass). An idle held connection costs next to nothing, and nothing
+// is read from disk or sent while a person's data is not changing.
+const syncVersions = new Map();   // id -> latest version, so waiting devices never touch the disk
+const syncWaiters = new Map();    // id -> Set of callbacks
+let syncWaiting = 0;
+function syncChanged(id, version, erased = false) {
+  syncVersions.set(id, { version, erased });
+  if (syncVersions.size > 200000) syncVersions.delete(syncVersions.keys().next().value);
+  const set = syncWaiters.get(id);
+  if (set) for (const tell of [...set]) tell({ version, erased });
+}
 
 // How much encrypted sync data is stored, counted once at start and kept up to date after that.
 let syncTotal = 0;
@@ -276,6 +296,11 @@ const server = http.createServer(async (req, res) => {
       const lat = Number(url.searchParams.get('lat')), lon = Number(url.searchParams.get('lon'));
       if (!/^[\p{L} .'()-]{2,60}$/u.test(city)) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'aqi city'); }
       if (!cfg.dataGovKey) { send(res, 503, 'api_error', 'Official air-quality data is not set up on this service.'); return log(503, 'aqi no key'); }
+      if (!cfg.aqiServerFetch) {
+        const body = JSON.stringify({ fetch: `${AQI_RESOURCE}?api-key=${cfg.dataGovKey}&format=json&limit=2000&filters%5Bcity%5D=${encodeURIComponent(city)}` });
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(body);
+        return log(200, 'aqi handed to the app');
+      }
       try {
         const data = await cityAqi(city, lat, lon);
         if (!data) { send(res, 404, 'not_found_error', 'No official monitor is listed for this city.'); return log(404, 'aqi none'); }
@@ -283,6 +308,32 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(body);
         return log(200, `aqi ${data.stations} stations`);
       } catch (e) { send(res, 502, 'api_error', 'The air-quality data is not available right now.'); return log(502, 'aqi ' + (e?.message || '')); }
+    }
+
+    const waitMatch = /^\/v1\/sync\/([0-9a-f]{64})\/wait$/.exec(url.pathname);
+    if (waitMatch && req.method === 'GET') {
+      if (!checkCaller(req, Buffer.alloc(0))) { send(res, 401, 'authentication_error', 'Unrecognised client.'); return log(401); }
+      if (!cfg.syncDir) { send(res, 503, 'api_error', 'Sync is not set up on this service.'); return; }
+      const id = waitMatch[1];
+      const have = Number(url.searchParams.get('have'));
+      let known = syncVersions.get(id);
+      if (!known) {
+        try { const cur = JSON.parse(fs.readFileSync(`${cfg.syncDir}/${id}.json`, 'utf8')); known = { version: cur.version, erased: !!cur.erased }; }
+        catch { known = { version: 0, erased: false }; }
+        syncVersions.set(id, known);
+      }
+      const reply = v => { const b = JSON.stringify(v); res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(b); };
+      if (known.version !== have) return reply(known);
+      const set = syncWaiters.get(id) || new Set();
+      // Too many waiting (in all, or for one person): answer at once and ask for a slow poll instead.
+      if (syncWaiting >= cfg.syncMaxWaiters || set.size >= 8) { res.writeHead(204, { 'retry-after': '60' }); return res.end(); }
+      let done = false;
+      const finish = () => { if (done) return false; done = true; clearTimeout(timer); set.delete(tell); if (!set.size) syncWaiters.delete(id); syncWaiting--; return true; };
+      const tell = v => { if (finish()) reply(v); };
+      const timer = setTimeout(() => { if (finish()) { res.writeHead(204); res.end(); } }, 50_000);
+      set.add(tell); syncWaiters.set(id, set); syncWaiting++;
+      res.on('close', finish);
+      return;
     }
 
     const syncMatch = /^\/v1\/sync\/([0-9a-f]{64})$/.exec(url.pathname);
@@ -300,6 +351,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET') {
         const cur = current();
         if (!cur) { send(res, 404, 'not_found_error', 'Nothing is stored for this code yet.'); return log(404, 'sync get'); }
+        // A device that already holds this version is told so in a few bytes instead of being sent it again.
+        if (!cur.erased && url.searchParams.get('have') === String(cur.version)) { res.writeHead(304, { 'cache-control': 'no-store' }); res.end(); return log(304, `sync same v${cur.version}`); }
         json(200, cur); return log(200, `sync get v${cur.version}`);
       }
       if (req.method === 'DELETE') {
@@ -310,6 +363,7 @@ const server = http.createServer(async (req, res) => {
         const marker = JSON.stringify({ version: (cur ? cur.version : 0) + 1, updated: Date.now(), erased: true });
         fs.writeFileSync(file, marker, { mode: 0o600 });
         syncTotal = Math.max(0, syncTotal - size + marker.length);
+        syncChanged(syncMatch[1], (cur ? cur.version : 0) + 1, true);
         json(200, { ok: true }); return log(200, 'sync erase');
       }
       let put;
@@ -330,6 +384,7 @@ const server = http.createServer(async (req, res) => {
       fs.writeFileSync(tmp, next, { mode: 0o600 }); fs.renameSync(tmp, file);
       syncTotal += next.length - oldSize;
       counters.devices[wk] = (counters.devices[wk] || 0) + 1;
+      syncChanged(syncMatch[1], version + 1);
       json(200, { version: version + 1 }); return log(200, `sync put v${version + 1} ${next.length}b`);
     }
 

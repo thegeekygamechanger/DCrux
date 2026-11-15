@@ -22,12 +22,39 @@ After that the app updates itself: it checks this repository's latest release on
 
 ### On a computer (Windows and Linux)
 
-The same release carries `DCrux-<version>-windows-x64.msi`, `DCrux-<version>-linux-x64.deb` and
-`DCrux-<version>-linux-x64.tar.gz` (unpack, run `DCrux/bin/DCrux`). It is the same app, built from the
-same source files. Turn on **Settings → Sync across devices** on both and enter the code shown on one
-into the other: channels, video notes, questions, tests and study settings then follow you, encrypted
-on the device before they are uploaded. Video notes are written on the phone (the computer build has
-no embedded player to read captions from) and arrive through sync.
+Each release also carries the computer app, built by GitHub from this same source:
+
+| System | File |
+| --- | --- |
+| Windows | `DCrux-<version>-windows-x64-setup.exe` (or the `.msi`) |
+| Debian, Ubuntu, Mint | `DCrux-<version>-linux-x64.deb` |
+| Any Linux | `DCrux-<version>-linux-x64.tar.gz`: unpack and run `DCrux/bin/DCrux` |
+
+It is the same app, compiled from the same source files as the phone app. A wide window gets a
+landscape layout (navigation rail, lists in columns, newspaper pages set like a broadsheet);
+made narrow, it becomes the phone layout.
+
+### Sync across your devices
+
+No account. In **Settings → Sync across devices** turn sync on: the device shows a QR code and a
+25-character code. On the phone choose **Scan the QR code on another device** and photograph it,
+or type the code. From then on channels, video notes, questions and answers, test results and
+study settings are the same on every paired device:
+
+- **End-to-end encrypted.** A key is derived from the code on the device; everything is encrypted
+  with it (AES-256-GCM) before upload. The service stores data it cannot read, under an address
+  also derived from the code.
+- **Immediate and light.** Opening the app syncs at once. While it is open it keeps one idle
+  connection on which the service says "something changed", so a change on one device reaches
+  the others within seconds; data moves only when something actually changed, and a device that
+  is already up to date is told so in a few bytes.
+- **Merged, not overwritten.** Devices take the union of what each has and the newer of two
+  versions; deletions are remembered so they stay deleted.
+- **Never uploaded:** PDFs and photos of answer pages.
+- Erasing the stored copy from one device switches sync off on the others.
+
+Video notes are written on the phone (the computer build has no embedded player to read captions
+from) and arrive on the computer through sync.
 
 ## What it does
 
@@ -55,6 +82,7 @@ Kotlin, Jetpack Compose, Material 3 Expressive.
 - **One score, out of 100.** Exam relevance is the sum of four parts (syllabus fit 40, likelihood of a question 30, depth 20, currency 10), built the same way for videos, headlines and test questions.
 - **Mains marking shows its working.** The AI first copies out what it can read from the pages, writing `[illegible]` where it cannot, and marks only that. Marks are the sum of five fixed criteria, capped in the app, and marked strictly. Time advice uses the time the app recorded, against the UPSC pace of 250 marks in three hours. It is an estimate to learn from, not an official score.
 - **Weather alerts are labelled for what they are.** They are worked out from Open-Meteo forecast data with fixed thresholds and are not official warnings.
+- **Air quality is India's own index, from the official monitors where there are any.** For Indian cities the AQI is the Central Pollution Control Board's, read from its monitoring stations through data.gov.in: the city figure is the average of its stations, shown with the worst station and the day's highest reading. Where a city has no monitor, and outside India, the app shows an estimate on the same scale from modelled particle levels and says that it is an estimate.
 - **Sync does not depend on one door.** YouTube's channel feed goes missing now and then; DCrux then reads the channel's own Videos and Live pages instead of reporting an error.
 - **Publishers keep their content.** DCrux stores a headline index (headline, short feed snippet, link). Full articles and e-papers are read on the publisher's site; paid e-papers need your own subscription.
 - **YouTube plays in YouTube's player.** DCrux adds no ads of its own and does not strip YouTube's.
@@ -78,7 +106,7 @@ The AI features use the Claude API. There are three ways to build the app:
 | Build | Key | For |
 | --- | --- | --- |
 | Plain (no `secrets.properties`) | Each user pastes their own in **Settings → AI**; it is stored encrypted with the Android Keystore | Anyone building from source |
-| Service (`-PnoBakedKey=true` with `DCRUX_PROXY_URL` and `DCRUX_APP_SECRET` set) | None in the app; requests go through the relay in [`server/`](server/README.md), which holds the key and applies daily limits | A public release that works out of the box |
+| Service (`-PnoBakedKey=true` with `DCRUX_PROXY_URL` and `DCRUX_APP_SECRET` set) | None in the app; requests go through the relay in [`server/`](server/README.md), which holds the key and applies daily limits. The relay also stores the encrypted sync data and hands out the request for official air-quality readings. | A public release that works out of the box |
 | Personal (`CLAUDE_API_KEY` in `secrets.properties`) | Baked into the APK, only lightly masked | Your own phone only |
 
 `secrets.properties` lives in the project root and is git-ignored:
@@ -108,43 +136,24 @@ Every release must be signed with the same keystore, or Android will refuse the 
 
 ### Publishing an update
 
-Publishing a GitHub release is the whole update flow; no server of ours ever holds an APK.
+Publishing a GitHub release is the whole update flow; no server of ours ever holds an installer.
 
-1. Raise `versionCode` and `versionName` in `app/build.gradle.kts`, commit and push.
+1. Raise `versionCode` and `versionName` in `app/build.gradle.kts` and `appVersion` in `desktop/build.gradle.kts`, commit and push.
 2. Write `release-notes/<version>.md`.
-3. Run `GITHUB_PAT=... scripts/release.sh`.
-
-The script builds the public APK (no key inside), refuses to go on if a key is found in it,
-then creates the release and uploads `DCrux-<version>.apk`.
-
-## Project layout
-
-```
-app/src/main/java/app/dcrux/
-  data/      Room database, settings, Keystore-backed secure store
-  net/       YouTube and news sources, Wikimedia Commons photos, weather, HTTP
-  ai/        Claude Messages API client (streaming), prompts, background keep-alive
-  mains/     A Mains attempt in progress: timers, page photos, evaluation
-  sync/      Daily sync and manual refresh; CloudSync (encrypted sync across a person's devices)
-  Platform.kt   The one interface through which the screens reach the device (Android or computer)
-  update/    In-app updates from GitHub releases
-  audio/     Procedural sound engine and playback service
-  pdf/       In-memory PDF layout and streaming share provider
-  lock/      Biometric and PIN app lock
-  ui/        Compose screens and theme
-desktop/         The Windows and Linux app: the same sources as app/, plus the computer's side of Platform
-server/          The optional relay that holds the API key for public builds
-scripts/         release.sh
-release-notes/   One file per version, shown on GitHub and inside the app
-licenses/        Font licences
-```
+3. Run `GITHUB_PAT=... scripts/release.sh`. It builds the public APK (no key inside), refuses to go on
+   if a key is found in it, then creates the release and uploads `DCrux-<version>.apk`.
+4. On GitHub, run **Actions → Desktop installers** with the release tag. It builds the Windows `.exe`
+   and `.msi` and the Linux `.deb` and `.tar.gz`, starts each packaged app off-screen to check that it
+   runs, and attaches them to the release. It needs the repository secrets `DCRUX_PROXY_URL` and
+   `DCRUX_APP_SECRET`.
 
 ### The desktop app
 
 ```bash
 ./gradlew :desktop:run                    # run it
 ./gradlew :desktop:createDistributable    # the app with its own Java runtime, in desktop/build/compose/binaries
-./gradlew :desktop:packageDeb             # or packageMsi on Windows
+./gradlew :desktop:packageDeb             # or packageMsi / packageExe on Windows
+./gradlew :desktop:syncCheck              # two simulated devices pair and sync through a local relay (see the task's comment)
 ./gradlew :desktop:render -Pshots="<data dir> <out dir> nosync wait:2500 first"   # draw it off-screen to a PNG
 ```
 

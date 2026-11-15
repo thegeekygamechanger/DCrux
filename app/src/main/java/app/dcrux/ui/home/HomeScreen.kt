@@ -176,7 +176,8 @@ fun HomeTab(settings: Settings, host: Host) {
         if (fresh && weatherTick == 0) return@LaunchedEffect
         // Runs in the app's scope so that leaving the screen mid-way does not lose the answer; one retry for a slow start.
         g.scope.launch {
-            val got = runCatching { g.weather.fetch(place) }.getOrNull() ?: run { delay(4000); runCatching { g.weather.fetch(place) }.getOrNull() }
+            val before = settings.weather
+            val got = runCatching { g.weather.fetch(place, before) }.getOrNull() ?: run { delay(4000); runCatching { g.weather.fetch(place, before) }.getOrNull() }
             if (got != null && g.prefs.get().place == place) g.prefs.setWeather(got)
         }
     }

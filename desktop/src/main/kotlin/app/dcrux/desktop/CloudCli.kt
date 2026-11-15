@@ -12,6 +12,12 @@ fun main(args: Array<String>) {
     runBlocking {
         when (args.getOrNull(1)) {
             "join" -> println("joined: " + g.cloud.join(args.getOrElse(2) { "" }))
+            // Prints the air quality the app would show for a city: CloudCli <dir> aqi <name> <lat> <lon> <region>
+            "aqi" -> {
+                val w = g.weather.fetch(app.dcrux.data.Place(args[2], args[3].toDouble(), args[4].toDouble(), args.drop(5).joinToString(" ")))
+                println("${args[2]}: AQI ${w.aqi} (${app.dcrux.net.WeatherRepo.aqiWord(w.aqi)}), source=${w.aqiSource}, stations=${w.aqiStations}, worst=${w.aqiWorstStation} ${w.aqiWorst}, peak=${w.aqiPeak}, updated=${w.aqiUpdated}, pm2.5=${w.pm25}")
+                kotlin.system.exitProcess(0)
+            }
             "sync" -> g.cloud.syncNow()
             // Ends sync for this code and erases the stored copy (after a test pairing).
             "erase" -> g.cloud.disable(eraseCloud = true)

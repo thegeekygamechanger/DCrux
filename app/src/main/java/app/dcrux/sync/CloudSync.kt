@@ -96,6 +96,8 @@ class CloudSync(private val g: Graph) {
     private val lock = Mutex()
     private var loop: Job? = null
     private var soon: Job? = null
+    private var listener: Job? = null
+    private val remoteFile: File get() = File(g.platform.filesDir, "cloud_remote")
     private val memoryFile: File get() = File(g.platform.filesDir, "cloud_memory")
 
     /** True when this build can sync at all (it needs the DCrux service). */
@@ -103,14 +105,50 @@ class CloudSync(private val g: Graph) {
 
     fun code(): String? = g.secure.syncSecret()?.let(::pretty)
 
-    /** Begins the background rhythm: now, then every few minutes while the app is open. */
+    /**
+     * Begins syncing: once now, and from then on whenever something changes, here or on another device.
+     * Nothing is polled. While the app is in use it keeps one idle connection open on which the service
+     * says "your data changed" the moment another device saves; only then is anything downloaded. A change
+     * made here is uploaded a few seconds after it happens. A slow safety sync covers anything missed.
+     */
     fun start() {
         status.value = CloudStatus(on = g.secure.syncSecret() != null)
         if (loop != null || !available) return
         loop = g.scope.launch {
             while (true) {
                 if (g.secure.syncSecret() != null) syncNow()
-                delay(5 * 60_000L)
+                delay(20 * 60_000L)
+            }
+        }
+    }
+
+    /**
+     * Tells sync whether the app is in use. In use, it syncs at once (so opening the app always shows the
+     * latest) and listens for changes from other devices; put away, it stops listening and costs nothing.
+     */
+    fun setActive(on: Boolean) {
+        if (!available) return
+        listener?.cancel()
+        listener = null
+        if (!on) return
+        listener = g.scope.launch {
+            if (g.secure.syncSecret() != null) syncNow()
+            var pause = 5_000L
+            while (true) {
+                val secret = g.secure.syncSecret()
+                if (secret == null) { delay(4_000); continue }
+                val have = loadMemory().version
+                val answer = g.claude.serviceCall("GET", "/v1/sync/${Keys(secret).id}/wait?have=$have")
+                when (answer?.first) {
+                    200 -> {
+                        // Something newer is stored (or this device has never synced): fetch and merge it.
+                        syncNow()
+                        if (status.value.error != null) delay(pause.also { pause = minOf(pause * 2, 120_000L) }) else pause = 5_000L
+                    }
+                    204 -> pause = 5_000L                                  // nothing changed in the last minute: ask again
+                    null -> delay(pause.also { pause = minOf(pause * 2, 120_000L) })   // offline: back off
+                    else -> delay(5 * 60_000L)                              // the service cannot do this right now
+                }
             }
         }
     }
@@ -119,7 +157,7 @@ class CloudSync(private val g: Graph) {
     fun syncSoon() {
         if (g.secure.syncSecret() == null) return
         soon?.cancel()
-        soon = g.scope.launch { delay(15_000); syncNow() }
+        soon = g.scope.launch { delay(3_000); syncNow() }
     }
 
     /** Turns sync on with a new code and uploads what this device has. Returns the code to enter on the other devices. */
@@ -152,7 +190,7 @@ class CloudSync(private val g: Graph) {
         status.value = CloudStatus(on = false)
     }
 
-    private fun forget() { runCatching { memoryFile.delete() } }
+    private fun forget() { runCatching { memoryFile.delete(); remoteFile.delete() } }
 
     suspend fun syncNow() {
         val secret = g.secure.syncSecret() ?: return
@@ -180,14 +218,20 @@ class CloudSync(private val g: Graph) {
     private suspend fun exchange(keys: Keys) {
         var memory = loadMemory()
         repeat(4) {
-            val got = g.claude.serviceCall("GET", "/v1/sync/${keys.id}") ?: throw IllegalStateException("No connection to the sync service")
+            // The stored copy as last seen is kept on this device (still encrypted), so when nothing changed on the
+            // service only a few bytes come back instead of the whole of it.
+            val cached = runCatching { remoteFile.takeIf { it.exists() }?.readText()?.split('\n', limit = 2)?.takeIf { it.size == 2 } }.getOrNull()
+            val got = g.claude.serviceCall("GET", "/v1/sync/${keys.id}" + (cached?.let { "?have=${it[0]}" } ?: "")) ?: throw IllegalStateException("No connection to the sync service")
             val (remote, version) = when (got.first) {
+                304 -> (keys.open(cached!![1]) ?: throw IllegalStateException("The saved copy could not be read")) to cached[0].toInt()
                 200 -> {
                     val o = AppJson.parseToJsonElement(got.second).jsonObject
                     if (o["erased"]?.jsonPrimitive?.content == "true") throw ErasedElsewhere()
                     val data = o["data"]?.jsonPrimitive?.content.orEmpty()
                     val state = keys.open(data) ?: throw IllegalStateException("This code does not open the stored data. Check the code.")
-                    state to (o["version"]?.jsonPrimitive?.intOrNull ?: 0)
+                    val v = o["version"]?.jsonPrimitive?.intOrNull ?: 0
+                    runCatching { remoteFile.writeText("$v\n$data") }
+                    state to v
                 }
                 404 -> CloudState() to 0
                 503 -> throw IllegalStateException("Sync is not available on the service right now")
@@ -202,9 +246,11 @@ class CloudSync(private val g: Graph) {
             val merged = merge(remote, local, gone.filterValues { now - it < 180L * 86_400_000L })
             apply(merged, local)
             if (merged != remote) {
-                val put = g.claude.serviceCall("PUT", "/v1/sync/${keys.id}", """{"base":$version,"data":"${keys.seal(merged)}"}""")
+                val sealed = keys.seal(merged)
+                val put = g.claude.serviceCall("PUT", "/v1/sync/${keys.id}", """{"base":$version,"data":"$sealed"}""")
                     ?: throw IllegalStateException("No connection to the sync service")
-                if (put.first == 409) return@repeat          // another device saved meanwhile: fetch, merge and try again
+                if (put.first == 409) { runCatching { remoteFile.delete() }; return@repeat }   // another device saved meanwhile: fetch, merge and try again
+                if (put.first == 200) runCatching { remoteFile.writeText("${version + 1}\n$sealed") }
                 if (put.first != 200) throw IllegalStateException(if (put.first == 413) "There is too much to sync in one go" else "The sync service answered ${put.first}")
             }
             memory = SyncMemory(

@@ -176,7 +176,7 @@ fun AskSheet(topic: AiRepo.AskTopic, subtitle: String, onDismiss: () -> Unit) {
                 }
                 items(history, key = { it.id }) { a ->
                     Column {
-                        Exchange(a.question, Dates.dateTime(a.askedAt), onDelete = { scope.launch { g.db.asks().delete(a.id) } }) {
+                        Exchange(a.question, Dates.dateTime(a.askedAt), onDelete = { scope.launch { g.db.asks().delete(a.id); g.cloud.syncSoon() } }) {
                             Markdown(g.ai.answerOnly(a.answer))
                             Sources(g.ai.sourcesOf(a.answer), ::openSource)
                         }

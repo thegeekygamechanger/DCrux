@@ -57,6 +57,7 @@ class Graph(
     }.getOrNull()?.takeIf { it.isNotBlank() }
 
     init {
+        prefs.onSharedChange = { cloud.syncSoon() }
         if (usesService) {
             unmask(keys.sa, keys.sb)?.let { secret ->
                 claude.service = ServiceAuth(keys.px, secure.deviceId(), secret.toByteArray())

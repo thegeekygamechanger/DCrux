@@ -50,6 +50,9 @@ data class Settings(
 )
 
 class Prefs(private val store: DataStore<Preferences>) {
+    /** Called when a setting that is shared across the person's devices changes (set by sync). */
+    var onSharedChange: () -> Unit = {}
+
     private object K {
         val theme = stringPreferencesKey("theme")
         val dynamic = booleanPreferencesKey("dynamic")
@@ -125,9 +128,9 @@ class Prefs(private val store: DataStore<Preferences>) {
 
     suspend fun setTheme(v: String) = edit { it[K.theme] = v }
     suspend fun setDynamic(v: Boolean) = edit { it[K.dynamic] = v }
-    suspend fun setExams(v: Set<String>) = edit { it[K.exams] = v }
-    suspend fun setLanguage(v: String) = edit { it[K.language] = v }
-    suspend fun setPreferDetailed(v: Boolean) = edit { it[K.detailed] = v }
+    suspend fun setExams(v: Set<String>) { edit { it[K.exams] = v }; onSharedChange() }
+    suspend fun setLanguage(v: String) { edit { it[K.language] = v }; onSharedChange() }
+    suspend fun setPreferDetailed(v: Boolean) { edit { it[K.detailed] = v }; onSharedChange() }
     suspend fun setAutoModel(v: Boolean) = edit { it[K.autoModel] = v }
     suspend fun setModelId(v: String) = edit { it[K.modelId] = v }
     suspend fun setModels(v: List<ModelInfo>) = edit { it[K.models] = AppJson.encodeToString(v) }
@@ -135,11 +138,11 @@ class Prefs(private val store: DataStore<Preferences>) {
     suspend fun setWifiOnly(v: Boolean) = edit { it[K.wifiOnly] = v }
     suspend fun setAiCurate(v: Boolean) = edit { it[K.aiCurate] = v }
     suspend fun setPageFlip(v: Boolean) = edit { it[K.pageFlip] = v }
-    suspend fun setShowShorts(v: Boolean) = edit { it[K.shorts] = v }
+    suspend fun setShowShorts(v: Boolean) { edit { it[K.shorts] = v }; onSharedChange() }
     suspend fun setPageSize(v: Int) = edit { it[K.pageSize] = v }
-    suspend fun setNewsSource(v: String) = edit { it[K.newsSource] = v }
-    suspend fun setEnabledSources(v: Set<String>) = edit { it[K.sources] = v }
-    suspend fun setCustomSources(v: List<CustomSource>) = edit { it[K.custom] = AppJson.encodeToString(v) }
+    suspend fun setNewsSource(v: String) { edit { it[K.newsSource] = v }; onSharedChange() }
+    suspend fun setEnabledSources(v: Set<String>) { edit { it[K.sources] = v }; onSharedChange() }
+    suspend fun setCustomSources(v: List<CustomSource>) { edit { it[K.custom] = AppJson.encodeToString(v) }; onSharedChange() }
     suspend fun setLock(v: Boolean) = edit { it[K.lock] = v }
     suspend fun setBiometric(v: Boolean) = edit { it[K.biometric] = v }
     suspend fun setLastSync(v: Long) = edit { it[K.lastSync] = v }
@@ -149,7 +152,7 @@ class Prefs(private val store: DataStore<Preferences>) {
     suspend fun setLastUpdateCheck(v: Long) = edit { it[K.lastUpdateCheck] = v }
     suspend fun setCloudLastSync(v: Long) = edit { it[K.cloudLastSync] = v }
     suspend fun setTourDone(v: Boolean) = edit { it[K.tourDone] = v }
-    suspend fun setPlace(v: Place?) = edit { if (v == null) { it.remove(K.place); it.remove(K.weather) } else { it[K.place] = AppJson.encodeToString(v); it.remove(K.weather) } }
+    suspend fun setPlace(v: Place?) { edit { if (v == null) { it.remove(K.place); it.remove(K.weather) } else { it[K.place] = AppJson.encodeToString(v); it.remove(K.weather) } }; onSharedChange() }
     suspend fun setWeather(v: Weather) = edit { it[K.weather] = AppJson.encodeToString(v) }
     suspend fun setReaderScale(v: Float) = edit { it[K.readerScale] = (v * 100).toInt() }
 

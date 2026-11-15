@@ -248,6 +248,8 @@ data class Weather(
     val aqiWorst: Int = -1,
     val aqiPeak: Int = -1,
     val aqiUpdated: String = "",
+    /** When the official reading was fetched; the monitors report hourly, so it is reused for most of an hour. */
+    val aqiAt: Long = 0,
 )
 
 @Serializable

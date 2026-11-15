@@ -64,7 +64,8 @@ class WeatherRepo(private val platform: app.dcrux.Platform, private val service:
         }.sortedByDescending { it.region.endsWith("India") }
     }
 
-    suspend fun fetch(place: Place): Weather = coroutineScope {
+    /** [previous] is the last reading for this place, whose official air-quality figure is reused while it is fresh. */
+    suspend fun fetch(place: Place, previous: Weather? = null): Weather = coroutineScope {
         // Air quality is a separate service, asked at the same time; the weather still shows when it is unavailable.
         val airJob = async {
             runCatching {
@@ -75,11 +76,12 @@ class WeatherRepo(private val platform: app.dcrux.Platform, private val service:
         }
         // India's official monitors (CPCB), through the DCrux service, for cities that have them.
         val officialJob = async {
-            if (!place.region.contains("India")) null
-            else runCatching {
-                service?.serviceGet("/v1/aqi?city=${URLEncoder.encode(place.name, "UTF-8")}&lat=${place.lat}&lon=${place.lon}")
-                    ?.let { AppJson.parseToJsonElement(it).jsonObject.takeIf { o -> o["aqi"] != null } }
-            }.getOrNull()
+            when {
+                !place.region.contains("India") -> null
+                // The monitors report once an hour: a reading from the last 50 minutes is still the current one.
+                previous?.aqiSource == "cpcb" && System.currentTimeMillis() - previous.aqiAt < 50 * 60_000L -> previous
+                else -> runCatching { official(place) }.getOrNull()
+            }
         }
         val w = AppJson.parseToJsonElement(
             Http.getText(
@@ -116,13 +118,60 @@ class WeatherRepo(private val platform: app.dcrux.Platform, private val service:
         // Official monitors, when the city has them, replace the estimate.
         val o = official
         if (o == null) modelled else modelled.copy(
-            aqi = o["aqi"]?.jsonPrimitive?.intOrNull ?: modelled.aqi, aqiSource = "cpcb",
-            aqiStations = o["stations"]?.jsonPrimitive?.intOrNull ?: 0,
-            aqiWorstStation = (o["worst"] as? JsonObject)?.get("station")?.jsonPrimitive?.content.orEmpty(),
-            aqiWorst = (o["worst"] as? JsonObject)?.get("aqi")?.jsonPrimitive?.intOrNull ?: -1,
-            aqiPeak = o["peak"]?.jsonPrimitive?.intOrNull ?: -1,
-            aqiUpdated = o["updated"]?.jsonPrimitive?.content.orEmpty(),
+            aqi = o.aqi, aqiSource = "cpcb", aqiStations = o.aqiStations, aqiWorstStation = o.aqiWorstStation,
+            aqiWorst = o.aqiWorst, aqiPeak = o.aqiPeak, aqiUpdated = o.aqiUpdated, aqiAt = o.aqiAt,
         )
+    }
+
+    /**
+     * The city's AQI from CPCB's monitors. The DCrux service either answers itself or, when it is hosted
+     * outside India (where data.gov.in does not answer), hands back the request to make, and this device
+     * fetches the readings directly. Null when the city has no monitor or nothing could be reached.
+     */
+    private suspend fun official(place: Place): Weather? {
+        val reply = service?.serviceGet("/v1/aqi?city=${URLEncoder.encode(place.name, "UTF-8")}&lat=${place.lat}&lon=${place.lon}") ?: return null
+        val o = AppJson.parseToJsonElement(reply).jsonObject
+        val blank = Weather(at = 0, temp = 0.0, feels = 0.0, code = 0, max = 0.0, min = 0.0, rain = 0.0, uv = 0.0, dayCode = 0)
+        o["aqi"]?.jsonPrimitive?.intOrNull?.let { aqi ->
+            return blank.copy(
+                aqi = aqi, aqiStations = o["stations"]?.jsonPrimitive?.intOrNull ?: 0,
+                aqiWorstStation = (o["worst"] as? JsonObject)?.get("station")?.jsonPrimitive?.content.orEmpty(),
+                aqiWorst = (o["worst"] as? JsonObject)?.get("aqi")?.jsonPrimitive?.intOrNull ?: -1,
+                aqiPeak = o["peak"]?.jsonPrimitive?.intOrNull ?: -1, aqiUpdated = o["updated"]?.jsonPrimitive?.content.orEmpty(),
+                aqiAt = System.currentTimeMillis(),
+            )
+        }
+        val url = o["fetch"]?.jsonPrimitive?.content ?: return null
+        val records = AppJson.parseToJsonElement(Http.getText(url, headers)).jsonObject["records"]?.jsonArray ?: return null
+        // Each station's index is its worst pollutant's sub-index; the city's is the average of its stations (CPCB's method).
+        class Station(val name: String, val lat: Double, val lon: Double) { var aqi = -1.0; var peak = -1.0; var hasPm = false; var updated = "" }
+        val stations = LinkedHashMap<String, Station>()
+        for (el in records) {
+            val r = el.jsonObject
+            fun text(k: String) = r[k]?.jsonPrimitive?.content.orEmpty()
+            val value = text("avg_value").toDoubleOrNull() ?: continue
+            val st = stations.getOrPut(text("station").ifBlank { continue }) {
+                Station(text("station").replace(Regex("\\s*-\\s*[A-Z]{3,6}$"), "").trim(), text("latitude").toDoubleOrNull() ?: Double.NaN, text("longitude").toDoubleOrNull() ?: Double.NaN)
+            }
+            if (value > st.aqi) st.aqi = value
+            text("max_value").toDoubleOrNull()?.let { if (it > st.peak) st.peak = it }
+            if (text("pollutant_id") == "PM2.5" || text("pollutant_id") == "PM10") st.hasPm = true
+            st.updated = text("last_update")
+        }
+        // A city name can be shared by places far apart; only monitors within reach of this city count.
+        val near = stations.values.filter { it.hasPm && it.aqi >= 0 && (it.lat.isNaN() || km(place.lat, place.lon, it.lat, it.lon) <= 60.0) }
+        if (near.isEmpty()) return null
+        val worst = near.maxBy { it.aqi }
+        return blank.copy(
+            aqi = near.map { it.aqi }.average().roundToInt(), aqiStations = near.size, aqiWorstStation = worst.name, aqiWorst = worst.aqi.roundToInt(),
+            aqiPeak = near.maxOf { it.peak }.roundToInt(), aqiUpdated = near.first().updated, aqiAt = System.currentTimeMillis(),
+        )
+    }
+
+    private fun km(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val x = Math.toRadians(lat2 - lat1); val y = Math.toRadians(lon2 - lon1)
+        val h = Math.sin(x / 2).let { it * it } + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(y / 2).let { it * it }
+        return 2 * 6371.0 * Math.asin(Math.sqrt(h))
     }
 
     companion object {

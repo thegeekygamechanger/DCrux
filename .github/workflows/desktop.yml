@@ -22,7 +22,7 @@ jobs:
           - os: ubuntu-latest
             task: packageDeb
           - os: windows-latest
-            task: packageMsi
+            task: packageMsi packageExe
     runs-on: ${{ matrix.os }}
     env:
       # Leaves the Android app out of the build, so no Android SDK is needed here.
@@ -78,7 +78,7 @@ jobs:
 
       - name: Make the installer
         shell: bash
-        run: ./gradlew :desktop:${{ matrix.task }} --no-daemon
+        run: for t in ${{ matrix.task }}; do ./gradlew ":desktop:$t" --no-daemon; done
 
       - name: Collect the files
         shell: bash
@@ -87,6 +87,7 @@ jobs:
           mkdir out
           find desktop/build/compose/binaries -name '*.deb' -exec cp {} "out/DCrux-$V-linux-x64.deb" \;
           find desktop/build/compose/binaries -name '*.msi' -exec cp {} "out/DCrux-$V-windows-x64.msi" \;
+          find desktop/build/compose/binaries -name '*.exe' -path '*main/exe*' -exec cp {} "out/DCrux-$V-windows-x64-setup.exe" \;
           if [ "$RUNNER_OS" = "Linux" ]; then tar -C desktop/build/compose/binaries/main/app -czf "out/DCrux-$V-linux-x64.tar.gz" DCrux; fi
           ls -la out
 

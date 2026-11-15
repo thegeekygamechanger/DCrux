@@ -58,6 +58,8 @@ class MainActivity : FragmentActivity(), Host {
 
     override fun onStop() {
         super.onStop()
+        // Put away: stop listening for changes from other devices (it starts again when the app comes back).
+        graph.cloud.setActive(false)
         stoppedAt = System.currentTimeMillis()
     }
 
@@ -65,6 +67,8 @@ class MainActivity : FragmentActivity(), Host {
         super.onStart()
         (application as DCruxApp).platform.activity = java.lang.ref.WeakReference(this)
         graph.updates.onAppForeground()
+        // Opened or brought back: sync at once and listen for changes while the app is in use.
+        graph.cloud.setActive(true)
         // Re-lock after the app has been in the background for a short while.
         if (stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 20_000) {
             lifecycleScope.launch {

@@ -136,6 +136,7 @@ class SyncManager(private val g: Graph) {
                 failed += link to (e.message ?: "Could not open this link")
             }
         }
+        if (added.isNotEmpty()) g.cloud.syncSoon()
         if (added.isNotEmpty() && g.prefs.get().aiCurate) g.scope.launch { g.ai.rateNewVideos() }
         return AddReport(added.distinct(), failed)
     }

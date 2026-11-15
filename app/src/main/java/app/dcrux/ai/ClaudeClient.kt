@@ -119,7 +119,10 @@ class ClaudeClient {
         runCatching {
             val bytes = body?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
             val req = base(path, VIA_SERVICE, null, bytes).method(method, if (body != null) bytes.toRequestBody(json) else null).build()
-            Http.streaming.newCall(req).execute().use { r -> r.code to r.body.string() }
+            val call = Http.streaming.newCall(req)
+            // A waiting call (sync's "tell me when something changes") is dropped at once when it is no longer wanted.
+            val handle = coroutineContext.job.invokeOnCompletion { if (it != null) call.cancel() }
+            try { call.execute().use { r -> r.code to r.body.string() } } finally { handle.dispose() }
         }.getOrNull()
     }
 

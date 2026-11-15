@@ -69,6 +69,7 @@ fun main() {
     }
     host.locked.value = runBlocking { graph.prefs.get().lockEnabled } && graph.secure.hasPin()
     graph.cloud.start()
+    graph.cloud.setActive(true)
     graph.scope.launch {
         val s = graph.prefs.get()
         launch { graph.updates.check() }

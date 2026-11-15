@@ -6,17 +6,29 @@ An app cannot keep a secret: anything inside an APK can be pulled out, however i
 So the public build of DCrux holds no key. It sends its two kinds of AI request to this relay,
 and the relay adds the key and forwards them.
 
-## What it allows
+## What it does
 
-- `GET /v1/models` and `POST /v1/messages`, streamed back as they arrive, `GET /v1/aqi` (official air quality for a city, when a data.gov.in key is set), and `GET`/`PUT`/`DELETE /v1/sync/<id>` (encrypted sync data, when a folder for it is set).
-- Only the models in `DCRUX_MODELS`, a cap on `max_tokens` and request size, and no tools except
-  the API's own web search (a few searches per answer, for Ask AI when the material lacks the answer).
-- Only text and inline pictures (the photographed pages of a Mains answer) as content; nothing
-  that would make the API fetch a URL or run a tool.
-- Only requests signed by the app (install id + time + body hash, HMAC with `DCRUX_APP_SECRET`),
-  each signature accepted once, so a captured request cannot be replayed.
-- Daily limits per install, per network address and overall, and a cap on how many requests one
-  install may have running at once. When a limit is hit the app shows the relay's message.
+- **AI:** `GET /v1/models` and `POST /v1/messages`, streamed back as they arrive.
+  - Only the models in `DCRUX_MODELS`, a cap on `max_tokens` and request size, and no tools except
+    the API's own web search (a few searches per answer, for Ask Crux AI when the material lacks the answer).
+  - Only text and inline pictures (the photographed pages of a Mains answer) as content; nothing
+    that would make the API fetch a URL or run a tool.
+  - Daily limits per install, per network address and overall, and a cap on how many requests one
+    install may have running at once. When a limit is hit the app shows the relay's message.
+- **Sync across a person's devices:** `GET`/`PUT`/`DELETE /v1/sync/<id>` and `GET /v1/sync/<id>/wait`.
+  - What is stored is already encrypted on the device with a key the relay never sees; the `<id>` is
+    derived from the same pairing code. The relay can neither read the data nor tell whose it is.
+  - Saves carry the version they were based on, so two devices saving at once merge instead of
+    overwriting (`409`). An erase leaves a small marker so the other devices stop.
+  - `/wait` is how sync is immediate without polling: the reply is held until the stored version
+    changes or about 50 seconds pass. An idle held connection costs next to nothing; nothing is read
+    from disk or sent while a person's data is not changing. `GET ...?have=<version>` answers `304`
+    when the device already has that version.
+- **Air quality:** `GET /v1/aqi?city=&lat=&lon=` for India's official AQI (CPCB monitors, via data.gov.in).
+  data.gov.in answers only from inside India, so a relay hosted elsewhere hands the app the request
+  to make and the app fetches the readings itself; the key is never inside the app package.
+- **Every call is signed by the app** (install id + time + body hash, HMAC with `DCRUX_APP_SECRET`),
+  and each signature is accepted once, so a captured request cannot be replayed.
 
 The defaults are set high enough that no real user meets them: they are circuit breakers
 against abuse, not a ration. Responses are streamed straight through and connections to the API
@@ -48,8 +60,10 @@ a hash of the install id, the model and the request size.
 | `DCRUX_STATE_FILE` | none | Where to keep the day's counters across restarts |
 | `DCRUX_SYNC_DIR` | none | A folder for sync across a person's devices. Each person's data arrives already encrypted with a key only their devices hold; the relay stores and returns it and cannot read it. Unset means sync is not offered. |
 | `DCRUX_SYNC_MAX_TOTAL_BYTES` | `2000000000` | Ceiling on all stored sync data |
+| `DCRUX_SYNC_MAX_WAITERS` | `20000` | Devices that may wait at once to be told of a change (`GET /v1/sync/<id>/wait`, an idle connection each); beyond it they are asked to check once a minute |
 | `DCRUX_SYNC_WRITES_DAILY` | `600` | Sync uploads per person per day |
-| `DATAGOV_API_KEY` | none | Your free key from data.gov.in. With it, `GET /v1/aqi?city=&lat=&lon=` answers with India's official AQI for the city from the CPCB monitors (cached for an hour). Without it the app shows its own estimate. |
+| `DATAGOV_API_KEY` | none | Your free key from data.gov.in, for India's official AQI from the CPCB monitors. data.gov.in only answers from inside India, so by default `GET /v1/aqi` gives the app (over the signed channel) the request to make and the app fetches the readings itself; the key is never inside the app package. Without the key the app shows its own estimate. |
+| `DCRUX_AQI_SERVER_FETCH` | off | Set to `1` on a relay hosted in India: it then fetches the readings itself and serves one cached answer per city for an hour. |
 
 Days are counted in India time.
 
@@ -59,7 +73,10 @@ Days are counted in India time.
 ANTHROPIC_API_KEY=sk-ant-... DCRUX_APP_SECRET=... node dcrux-proxy.mjs
 ```
 
-Node 18 or newer, no dependencies. In production run it under systemd as its own user, with the
+Node 18 or newer, no dependencies. The TLS front must allow request bodies as large as
+`DCRUX_MAX_BODY_BYTES` and must not time out a quiet connection in under a minute (the sync
+`/wait` call is held for up to 50 seconds); with nginx: `client_max_body_size 16m`,
+`proxy_buffering off`, `proxy_read_timeout 600s`. In production run it under systemd as its own user, with the
 settings in a root-only environment file, behind a TLS reverse proxy with response buffering off.
 
 ## Point the app at it

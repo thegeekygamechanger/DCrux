@@ -189,7 +189,7 @@ fun HistoryScreen(settings: Settings) {
                         }
                     }
                 }) { Text(if (video) "Open the video" else "Open the article") }
-                TextButton(onClick = { open = null; scope.launch { g.db.asks().delete(a.id) } }) { Text("Delete") }
+                TextButton(onClick = { open = null; scope.launch { g.db.asks().delete(a.id); g.cloud.syncSoon() } }) { Text("Delete") }
             }
         }
     }

@@ -472,7 +472,7 @@ fun TestsTab(settings: Settings) {
             onDismissRequest = { deleteAsk = null },
             title = { Text("Delete this result?") },
             text = { Text("${r.title}, ${r.scoreText}. It will be removed from this device and cannot be brought back.") },
-            confirmButton = { TextButton(onClick = { deleteAsk = null; scope.launch { g.db.tests().delete(id) } }) { Text("Delete") } },
+            confirmButton = { TextButton(onClick = { deleteAsk = null; scope.launch { g.db.tests().delete(id); g.cloud.syncSoon() } }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleteAsk = null }) { Text("Keep") } },
         )
     }

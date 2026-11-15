@@ -15,7 +15,7 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-val appVersion = "1.4.0"
+val appVersion = "1.4.1"
 
 // Android-only files: each has a counterpart of the same name and package in this module, or is not needed here.
 val androidOnly = listOf(
@@ -99,7 +99,7 @@ compose.desktop {
     application {
         mainClass = "app.dcrux.desktop.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Deb, TargetFormat.Msi, TargetFormat.AppImage)
+            targetFormats(TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Exe, TargetFormat.AppImage)
             packageName = "DCrux"
             packageVersion = appVersion
             description = "The daily crux of current affairs for UPSC and State PSC aspirants"

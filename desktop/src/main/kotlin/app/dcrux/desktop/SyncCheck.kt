@@ -68,6 +68,34 @@ fun main(args: Array<String>) {
         check("A sees the retaken test (attempt 2), still one entry", a.db.tests().all().singleOrNull()?.let { MainsStore.decode(a, it) }?.attempts == 2)
         check("A took B's newer language", a.prefs.get().language == "English")
 
+        // Real time: B is in use and only listening; a change saved by A must reach it by itself, quickly.
+        b.cloud.setActive(true)
+        kotlinx.coroutines.delay(2500)
+        a.db.asks().insert(Ask(articleId = "video:vid1", question = "Arrived in real time?", answer = "Yes.", askedAt = System.currentTimeMillis(), topic = "A lecture"))
+        a.cloud.syncNow()
+        val sent = System.currentTimeMillis()
+        var took = -1L
+        while (System.currentTimeMillis() - sent < 15_000) {
+            if (b.db.asks().all().any { it.question == "Arrived in real time?" }) { took = System.currentTimeMillis() - sent; break }
+            kotlinx.coroutines.delay(100)
+        }
+        check("B received A's change by itself, without being asked to sync (in $took ms)", took in 0..6000)
+        // And the other way, through the "something changed here" path: B deletes it, A (listening) loses it.
+        a.cloud.setActive(true)
+        kotlinx.coroutines.delay(2500)
+        b.db.asks().all().first { it.question == "Arrived in real time?" }.let { b.db.asks().delete(it.id) }
+        b.cloud.syncSoon()
+        val asked = System.currentTimeMillis()
+        var gone = -1L
+        while (System.currentTimeMillis() - asked < 20_000) {
+            if (a.db.asks().all().none { it.question == "Arrived in real time?" }) { gone = System.currentTimeMillis() - asked; break }
+            kotlinx.coroutines.delay(100)
+        }
+        check("a deletion on B reached A by itself (in $gone ms, including the 3 s wait that batches changes)", gone in 0..10_000)
+        // Idle: with nothing changing, listening devices must not be talking to the service.
+        kotlinx.coroutines.delay(6000)
+        a.cloud.setActive(false); b.cloud.setActive(false)
+
         // A removes the channel; B must lose it and not resurrect it.
         a.sync.removeChannel("chanA")
         a.cloud.syncNow(); b.cloud.syncNow(); a.cloud.syncNow()
