@@ -41,6 +41,15 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # Without the service's address and signing secret the app could not reach the AI or sync, so no installer is made.
+      - name: Check the build settings are present
+        shell: bash
+        run: |
+          if [ -z "$DCRUX_PROXY_URL" ] || [ -z "$DCRUX_APP_SECRET" ]; then
+            echo "DCRUX_PROXY_URL and DCRUX_APP_SECRET must be set as repository secrets (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
       - name: Build the app with its own Java runtime
         shell: bash
         run: ./gradlew :desktop:createDistributable --no-daemon
