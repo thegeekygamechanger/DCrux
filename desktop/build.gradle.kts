@@ -15,7 +15,7 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-val appVersion = "1.4.2"
+val appVersion = "1.4.3"
 
 // Android-only files: each has a counterpart of the same name and package in this module, or is not needed here.
 val androidOnly = listOf(

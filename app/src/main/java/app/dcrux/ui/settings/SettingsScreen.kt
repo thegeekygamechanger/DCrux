@@ -103,6 +103,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import app.dcrux.data.Dates
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -159,8 +160,9 @@ private fun SettingRow(title: String, summary: String, icon: ImageVector, onClic
             .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(46.dp).clip(Scallop).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-            Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
+        // Monochrome on purpose, in both themes: a white badge with the icon in black at its centre.
+        Box(Modifier.size(46.dp).clip(Scallop).background(Color.White), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(22.dp), tint = Color(0xFF101010))
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
@@ -181,7 +183,7 @@ private fun Section(title: String, icon: ImageVector, summary: String, open: Boo
         ModalBottomSheet(onDismissRequest = onToggle, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).navigationBarsPadding().imePadding()) {
                 Row(Modifier.padding(start = 22.dp, end = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(icon, null, tint = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.width(10.dp))
                     Text(title, style = MaterialTheme.typography.headlineSmall)
                 }
