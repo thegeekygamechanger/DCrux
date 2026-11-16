@@ -6,11 +6,11 @@
     android:viewportHeight="108">
     <!-- A plain, heavy D whose counter is a play triangle: video, distilled -->
     <path
-        android:fillColor="#FFFFFFFF"
+        android:fillColor="#FF0B0B0C"
         android:fillType="evenOdd"
         android:pathData="M36,32h17a22,22 0,0 1,0 44h-17a2.5,2.5 0,0 1,-2.5 -2.5v-39a2.5,2.5 0,0 1,2.5 -2.5zM46.5,45v18a1.4,1.4 0,0 0,2.2 1.2l13,-9a1.4,1.4 0,0 0,0 -2.4l-13,-9a1.4,1.4 0,0 0,-2.2 1.2z" />
-    <!-- the crux: one amber point -->
+    <!-- the crux: one point -->
     <path
-        android:fillColor="#FFFFB020"
+        android:fillColor="#FF0B0B0C"
         android:pathData="M73,35m-4.2,0a4.2,4.2 0,1 1,8.4 0a4.2,4.2 0,1 1,-8.4 0" />
 </vector>

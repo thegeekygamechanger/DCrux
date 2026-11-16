@@ -15,7 +15,7 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-val appVersion = "1.4.3"
+val appVersion = "1.4.4"
 
 // Android-only files: each has a counterpart of the same name and package in this module, or is not needed here.
 val androidOnly = listOf(
@@ -145,10 +145,5 @@ tasks.register<JavaExec>("cloud") {
     jvmArgs("-Djava.awt.headless=true")
 }
 
-// Draws the app's logo to desktop/icons/icon.png (see IconMaker.kt); the .ico for Windows is made from it.
-tasks.register<JavaExec>("makeIcon") {
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("app.dcrux.desktop.IconMakerKt")
-    args = listOf(file("icons/icon.png").path, "512")
-    jvmArgs("-Djava.awt.headless=true")
-}
+// The app icon (desktop/icons/icon.png and icon.ico: the black mark centred on a white tile) is drawn by
+// scripts/make_icon.py; run it again if the mark changes.
