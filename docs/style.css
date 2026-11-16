@@ -1,0 +1,107 @@
+/* The app's own typefaces, served with the page: Inter for text, a Helvetica (TeX Gyre Heros) for headlines. */
+@font-face { font-family:"Inter"; src:url("fonts/inter_regular.ttf") format("truetype"); font-weight:400; font-display:swap; }
+@font-face { font-family:"Inter"; src:url("fonts/inter_semibold.ttf") format("truetype"); font-weight:600 700; font-display:swap; }
+@font-face { font-family:"Heros"; src:url("fonts/heros_bold.otf") format("opentype"); font-weight:400 900; font-display:swap; }
+/* The app's own colours (ui/theme/Theme.kt): its indigo, the periwinkle of its cards, the teal its titles end in. */
+:root { --ink:#1c1b20; --soft:#48454e; --line:#e6e0ec; --bg:#fcf8ff; --tint:#f1ecf4; --card:rgba(252,248,255,.74);
+  --primary:#3f4bc4; --on-primary:#ffffff; --mid:#565b71; --teal:#006b5f;
+  --b1:#2e3a9e; --b2:#4553c9; --b3:#6a78e0; --wash:.17; --glow:.34; }
+@media (prefers-color-scheme: dark) { :root { --ink:#e5e1e9; --soft:#cac4cf; --line:#2a292f; --bg:#131218; --tint:#201f25; --card:rgba(32,31,37,.74);
+  --primary:#bcc2ff; --on-primary:#1a2478; --mid:#c1c5dc; --teal:#6fdbc9; --wash:.20; --glow:.30; } }
+* { box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.6 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-x:hidden; }
+h1, h2, h3 { font-family:"Heros", Helvetica, "Helvetica Neue", Arial, sans-serif; font-weight:700; letter-spacing:-0.02em; line-height:1.08; margin:0; }
+a { color:inherit; }
+.wrap { max-width:1080px; margin:0 auto; padding:0 24px; }
+
+/* The gradient is the app's: its indigo washing down from the top into a trace of teal, as behind every
+   screen, with the periwinkle of its cards drifting slowly through it. */
+.dawn { position:absolute; z-index:-1; inset:0 0 auto 0; height:920px; overflow:hidden; pointer-events:none;
+  background:linear-gradient(color-mix(in srgb, var(--primary) calc(var(--wash) * 100%), transparent), color-mix(in srgb, var(--teal) 7%, transparent) 55%, transparent);
+  -webkit-mask-image:linear-gradient(#000 40%, transparent); mask-image:linear-gradient(#000 40%, transparent); }
+.dawn::before { content:""; position:absolute; inset:-30% -60%; opacity:var(--glow); filter:blur(80px);
+  background:
+    radial-gradient(36% 44% at 24% 30%, var(--b3), transparent 70%),
+    radial-gradient(32% 42% at 50% 18%, var(--b2), transparent 70%),
+    radial-gradient(30% 40% at 78% 30%, var(--teal), transparent 72%);
+  animation:drift 32s ease-in-out infinite alternate; will-change:transform; }
+@keyframes drift { from { transform:translate3d(-7%, 0, 0) rotate(-2deg); } to { transform:translate3d(7%, 3%, 0) rotate(2deg); } }
+@media (prefers-reduced-motion: reduce) { .dawn::before { animation:none; } }
+/* The headline runs through the same three colours as the titles inside the app. */
+.grad { background:linear-gradient(100deg, var(--primary), var(--mid) 55%, var(--teal)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+
+header { display:flex; align-items:center; justify-content:space-between; padding:20px 0; }
+.mark { display:flex; align-items:center; gap:10px; font-weight:600; font-size:18px; text-decoration:none; }
+.mark img { width:32px; height:32px; }
+nav { display:flex; align-items:center; }
+nav a { margin-left:22px; color:var(--soft); text-decoration:none; font-size:15px; }
+nav a:hover { color:var(--ink); }
+nav a.pill { color:var(--on-primary); background:var(--primary); padding:8px 16px; border-radius:999px; font-weight:600; }
+
+.hero { padding:76px 0 40px; text-align:center; }
+.eyebrow { display:inline-block; font-size:14px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--soft); margin-bottom:18px; }
+.hero h1 { font-size:clamp(42px, 8vw, 82px); }
+.hero p { font-size:20px; color:var(--soft); max-width:31em; margin:22px auto 0; }
+.buttons { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin-top:30px; }
+.btn { display:inline-block; padding:13px 24px; border-radius:999px; border:1px solid var(--primary); color:var(--primary); text-decoration:none; font-weight:600; font-size:16px; transition:transform .15s ease; }
+.btn.primary { background:var(--primary); color:var(--on-primary); }
+.btn:hover { transform:translateY(-2px); }
+.small { font-size:14px; color:var(--soft); margin-top:14px; }
+
+/* The Desktop / Android switch: one highlight that slides between the two. */
+.switch { position:relative; display:inline-grid; grid-template-columns:1fr 1fr; margin:38px auto 22px; padding:4px; background:var(--card); border:1px solid var(--line); border-radius:999px; backdrop-filter:blur(10px); }
+.switch button { position:relative; z-index:1; border:0; background:none; font:inherit; font-weight:600; font-size:15px; color:var(--soft); padding:9px 26px; border-radius:999px; cursor:pointer; transition:color .25s ease; }
+.switch button[aria-selected="true"] { color:var(--on-primary); }
+.switch .thumb { position:absolute; top:4px; bottom:4px; left:4px; width:calc(50% - 4px); background:var(--primary); border-radius:999px; transition:transform .35s cubic-bezier(.3,1.4,.5,1); }
+body[data-device="android"] .switch .thumb { transform:translateX(100%); }
+
+.shot { margin:0; display:flex; justify-content:center; }
+.shot img { display:block; max-width:100%; height:auto; border:1px solid var(--line); box-shadow:0 30px 80px -30px rgba(46,58,158,.42); background:var(--tint); }
+.shot img.desktop { border-radius:16px; width:100%; }
+.shot img.android { border-radius:34px; width:min(300px, 78vw); }
+body[data-device="desktop"] .android, body[data-device="android"] .desktop { display:none; }
+
+.feature { display:grid; grid-template-columns:1fr 1.5fr; gap:48px; align-items:center; padding:64px 0; border-top:1px solid var(--line); }
+.feature.flip > div { order:2; }
+.feature.flip { grid-template-columns:1.5fr 1fr; }
+.feature .n { font-size:14px; font-weight:600; letter-spacing:.08em; color:var(--primary); margin-bottom:12px; }
+.feature h2 { font-size:clamp(30px, 4.4vw, 44px); margin-bottom:14px; }
+.feature p { color:var(--soft); font-size:18px; margin:0; max-width:23em; }
+body[data-device="android"] .feature { grid-template-columns:1.2fr 1fr; }
+body[data-device="android"] .feature.flip { grid-template-columns:1fr 1.2fr; }
+
+.why { padding:64px 0 8px; border-top:1px solid var(--line); text-align:center; }
+.why h2 { font-size:clamp(30px, 4.4vw, 44px); }
+.why > p { color:var(--soft); font-size:18px; max-width:30em; margin:14px auto 0; }
+.grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:22px; overflow:hidden; margin:36px 0 72px; text-align:left; }
+.grid div { background:var(--tint); padding:26px; }
+.grid h3 { font-size:19px; margin-bottom:8px; }
+.grid p { margin:0; color:var(--soft); font-size:15.5px; }
+
+.get { margin:0 0 72px; padding:44px 28px; border-radius:28px; text-align:center; color:#fff;
+  background:linear-gradient(115deg, var(--b1), var(--b2) 55%, var(--b3)); }
+.get h2 { font-size:clamp(28px, 4vw, 40px); }
+.get p { margin:12px auto 0; max-width:30em; opacity:.92; }
+.get .btn { border-color:#fff; color:#fff; }
+.get .btn.primary { background:#fff; color:#2e3a9e; }
+
+footer { border-top:1px solid var(--line); padding:28px 0 44px; color:var(--soft); font-size:14.5px; }
+footer a { margin-right:18px; }
+footer p { margin:12px 0 0; }
+article { padding:48px 0 80px; max-width:720px; }
+article h1 { font-size:44px; margin-bottom:26px; }
+article h2 { font-size:23px; margin:34px 0 8px; }
+article p, article li { color:var(--soft); }
+article p { margin:0 0 12px; }
+
+@media (max-width: 820px) {
+  .feature, .feature.flip, body[data-device="android"] .feature, body[data-device="android"] .feature.flip { grid-template-columns:1fr; gap:26px; padding:44px 0; text-align:center; }
+  .feature.flip > div { order:0; }
+  .feature p { margin:0 auto; }
+  .grid { grid-template-columns:1fr 1fr; }
+  nav a:not(.pill) { display:none; }
+  .hero { padding-top:44px; }
+}
+@media (max-width: 520px) { .grid { grid-template-columns:1fr; } }
+button, input, select, textarea { font-family:inherit; }

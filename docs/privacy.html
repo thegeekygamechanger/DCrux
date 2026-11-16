@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy · DCrux</title>
+<meta name="description" content="DCrux: privacy.">
+<link rel="canonical" href="https://thegeekygamechanger.github.io/DCrux/privacy.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="DCrux">
+<meta property="og:title" content="Privacy · DCrux">
+<meta property="og:description" content="DCrux: privacy.">
+<meta property="og:url" content="https://thegeekygamechanger.github.io/DCrux/privacy.html">
+<meta property="og:image" content="https://thegeekygamechanger.github.io/DCrux/shots/social.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="dawn"></div>
+<div class="wrap">
+<header>
+  <a class="mark" href="index.html"><img src="icon.png" alt="">DCrux</a>
+  <nav><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="https://github.com/thegeekygamechanger/DCrux">Source</a><a class="pill" href="https://github.com/thegeekygamechanger/DCrux/releases/latest">Download</a></nav>
+</header>
+<article><h1>Privacy</h1><h2>No account, no tracking</h2><p>DCrux has no sign-in, no ads and no analytics. Nobody receives a record of what you read or how you score.</p><h2>What stays on the device</h2><p>Your channels, video notes, headlines, questions you asked, test results and settings are stored only on this device. Test results and the app-lock PIN are encrypted with a key held in the phone&#x27;s secure hardware. Android backups are switched off, so none of it is copied to the cloud. It stays until you choose Reset in Settings or uninstall the app.</p><h2>What goes to Crux AI</h2><p>To write notes, scores, tests, answers and evaluations, the text involved (captions, headlines, your question) is sent to Anthropic&#x27;s Claude API; in the published app it travels through the DCrux relay. For a Mains evaluation, the photos of your answer pages are sent the same way. The relay does not store or log what is sent or what comes back. It records the time and size of each request against a scrambled install number, and counts the day&#x27;s requests per install and per network address, to stop abuse. When Ask Crux AI searches the web, the search is run by the AI service, not from your phone. Anthropic handles the content under its own terms.</p><h2>Photos of your answers</h2><p>Page photos are kept in the app&#x27;s private storage only until the evaluation finishes, then deleted. What remains is Crux AI&#x27;s reading of the pages and its feedback, stored encrypted with your result. DCrux does not ask for camera permission: your phone&#x27;s own camera app takes the picture.</p><h2>Location</h2><p>Optional. If you allow it, or type your city, only a city-level position (rounded to about a kilometre) is kept on the device and sent to Open-Meteo to fetch the weather. On phones without a built-in place lookup it is also sent to BigDataCloud to get the city&#x27;s name. For Indian cities, the city&#x27;s name also goes to the DCrux service and to data.gov.in, to read the official air-quality monitors there. Remove it any time from the weather sheet.</p><h2>Other services the app talks to</h2><p>YouTube (channel pages and the embedded player), the news publishers you pick (their feeds and sites, opened in the in-app browser), Wikimedia Commons (photos) and GitHub (app updates). Each sees your network address, as any website does, and applies its own privacy policy.</p><h2>Sync across your devices</h2><p>Off unless you turn it on. When on, your channels, video notes, questions and answers, test results and study settings are encrypted on the device with a key that only your devices hold, and only then passed through the DCrux service to your other devices. The service cannot read them, and it keeps them in memory only while relaying them; it writes none of your data to disk. That key never leaves your devices unprotected; the 4-character code used to add a device works once and is not the key. PDFs and page photos are never uploaded. You can end sync and clear the relayed copy at any time from Settings.</p><h2>Feedback you send</h2><p>A message sent from Settings → Send feedback goes through the DCrux service to the developer by email, together with the email address you chose to give, the app version, and whether you wrote from a phone or a computer. The service passes it on and keeps no copy.</p><h2>Deleting everything</h2><p>Settings → Data → Reset the app erases all of the above from this device. It does not erase a synced copy; use Settings → Sync across devices for that.</p></article>
+<footer>
+  <a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="https://github.com/thegeekygamechanger/DCrux">GitHub</a><a href="https://github.com/thegeekygamechanger/DCrux/releases/latest">Download</a>
+  <p>DCrux is free, open-source software (Apache 2.0). It is not affiliated with the UPSC, any Public Service Commission, YouTube, the channels you follow, or any newspaper. Their names belong to their owners.</p>
+</footer>
+</div>
+</body>
+</html>

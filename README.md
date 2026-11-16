@@ -2,6 +2,8 @@
 
 The daily crux of current affairs for UPSC and State PSC aspirants, on your phone.
 
+**Website:** https://thegeekygamechanger.github.io/DCrux/
+
 Follow YouTube channels and get each video as readable notes. Read the day's papers with
 every headline scored for your exam, and ask questions about any article. Test yourself on
 the news with Prelims MCQs, or write Mains answers on paper and have them read and marked.
@@ -165,6 +167,7 @@ Publishing a GitHub release is the whole update flow; no server of ours ever hol
 ./gradlew :desktop:packageDeb             # or packageMsi / packageExe on Windows
 ./gradlew :desktop:syncCheck              # two simulated devices pair and sync through a local relay (see the task's comment)
 ./gradlew :desktop:searchCheck            # search against a small library of titles, including dates and word order
+python3 scripts/site.py                   # rebuild the website in docs/ (served by GitHub Pages)
 ./gradlew :desktop:render -Pshots="<data dir> <out dir> nosync wait:2500 first"   # draw it off-screen to a PNG
 ```
 
