@@ -36,14 +36,23 @@ made narrow, it becomes the phone layout.
 
 ### Sync across your devices
 
-No account. In **Settings → Sync across devices** turn sync on: the device shows a QR code and a
-25-character code. On the phone choose **Scan the QR code on another device** and photograph it,
-or type the code. From then on channels, video notes, questions and answers, test results and
-study settings are the same on every paired device:
+No account. In **Settings → Sync across devices** turn sync on: the sheet shows a QR code and,
+under it, a 4-character code. On the other device open the same sheet and either type the four
+characters or (on a phone) scan the QR code. From then on channels, video notes, questions and
+answers, test results and study settings are the same on every paired device:
 
-- **End-to-end encrypted.** A key is derived from the code on the device; everything is encrypted
-  with it (AES-256-GCM) before upload. The service stores data it cannot read, under an address
-  also derived from the code.
+- **End-to-end encrypted.** Each group of devices shares a long random key that is made on the
+  first device and never shown; everything is encrypted with it (AES-256-GCM) before it leaves.
+  The service passes on data it cannot read, under an address also derived from that key.
+- **The 4-character code is not the key.** It is good once and for a few minutes. The two devices
+  use it to agree a fresh strong key that only someone who knows the code can agree (SPEKE, a
+  password-authenticated key exchange over a 2048-bit group), and the real key crosses locked
+  with that. Watching the exchange gives nothing to test guesses against; a wrong guess uses the
+  code up and a new one is shown; and the service rations attempts. The QR code carries the key
+  itself and never touches the service, so show both only to your own devices.
+- **Relayed, not stored.** The service keeps the latest encrypted copy in memory only, so a device
+  that was off can catch up, and writes none of it to disk. If the service restarts, the next
+  device to open simply puts its copy back; the devices are where the data lives.
 - **Immediate and light.** Opening the app syncs at once. While it is open it keeps one idle
   connection on which the service says "something changed", so a change on one device reaches
   the others within seconds; data moves only when something actually changed, and a device that
@@ -51,7 +60,7 @@ study settings are the same on every paired device:
 - **Merged, not overwritten.** Devices take the union of what each has and the newer of two
   versions; deletions are remembered so they stay deleted.
 - **Never uploaded:** PDFs and photos of answer pages.
-- Erasing the stored copy from one device switches sync off on the others.
+- **Turn off on all my devices** clears the relayed copy and switches sync off on the others.
 
 Video notes are written on the phone (the computer build has no embedded player to read captions
 from) and arrive on the computer through sync.
@@ -106,7 +115,7 @@ The AI features use the Claude API. There are three ways to build the app:
 | Build | Key | For |
 | --- | --- | --- |
 | Plain (no `secrets.properties`) | Each user pastes their own in **Settings → AI**; it is stored encrypted with the Android Keystore | Anyone building from source |
-| Service (`-PnoBakedKey=true` with `DCRUX_PROXY_URL` and `DCRUX_APP_SECRET` set) | None in the app; requests go through the relay in [`server/`](server/README.md), which holds the key and applies daily limits. The relay also stores the encrypted sync data and hands out the request for official air-quality readings. | A public release that works out of the box |
+| Service (`-PnoBakedKey=true` with `DCRUX_PROXY_URL` and `DCRUX_APP_SECRET` set) | None in the app; requests go through the relay in [`server/`](server/README.md), which holds the key and applies daily limits. The relay also passes the encrypted sync data between a person's devices (held in memory, never written to disk) and hands out the request for official air-quality readings. | A public release that works out of the box |
 | Personal (`CLAUDE_API_KEY` in `secrets.properties`) | Baked into the APK, only lightly masked | Your own phone only |
 
 `secrets.properties` lives in the project root and is git-ignored:

@@ -1,5 +1,16 @@
 package app.dcrux.ui.settings
 
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.ui.unit.em
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.layout.widthIn
 import app.dcrux.ui.components.QrCode
 import androidx.compose.material.icons.rounded.QrCodeScanner
@@ -92,6 +103,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import app.dcrux.data.Dates
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import app.dcrux.ui.components.appBackground
 import app.dcrux.ai.ClaudeException
 import app.dcrux.data.CustomSource
@@ -112,24 +126,67 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** One group of settings: an icon, a name, a line saying what is set now, and the controls when opened. */
+/** The scalloped badge behind each setting's icon: a circle with twelve soft lobes. */
+private val Scallop = GenericShape { size, _ ->
+    val cx = size.width / 2f; val cy = size.height / 2f; val r = minOf(cx, cy)
+    for (i in 0..144) {
+        val t = (i / 144.0 * 2 * Math.PI)
+        val k = r * (0.93f + 0.07f * Math.cos(12 * t).toFloat())
+        val x = cx + k * Math.cos(t).toFloat(); val y = cy + k * Math.sin(t).toFloat()
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+    close()
+}
+
+/** A heading in small capitals over a block of rows that read as one card. */
+@Composable
+private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            title.uppercase(), Modifier.padding(start = 10.dp, top = 6.dp, bottom = 8.dp),
+            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 0.09.em), color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // The rows keep small corners; the block as a whole is rounded, so first and last rows get the large ones.
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)), verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
+    }
+}
+
+/** One row of the settings list: badge, name, what is set now, and an arrow. */
+@Composable
+private fun SettingRow(title: String, summary: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(46.dp).clip(Scallop).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** One setting: its row in the list and, when opened, its controls in a sheet that slides up. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Section(title: String, icon: ImageVector, summary: String, open: Boolean, onToggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    val turn by animateFloatAsState(if (open) 180f else 0f, label = "section")
-    CruxCard(Modifier.fillMaxWidth(), color = if (open) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.animateContentSize()) {
-            Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-                    Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+    SettingRow(title, summary, icon, onToggle)
+    if (open) {
+        val maxHeight = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height * 0.9f).toDp() }
+        ModalBottomSheet(onDismissRequest = onToggle, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).navigationBarsPadding().imePadding()) {
+                Row(Modifier.padding(start = 22.dp, end = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Text(title, style = MaterialTheme.typography.headlineSmall)
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                    Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Icon(Icons.Rounded.ExpandMore, if (open) "Close" else "Open", Modifier.rotate(turn))
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp), content = content)
             }
-            if (open) Column(Modifier.padding(bottom = 8.dp), content = content)
         }
     }
 }
@@ -253,9 +310,10 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
         CruxList(
             if (asTab) Modifier.weight(1f) else Modifier.weight(1f).navigationBarsPadding(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = if (asTab) 32.dp + bottomBarInset() else 32.dp),
-            spacing = 10.dp, minColumn = 460.dp,
+            spacing = 18.dp, minColumn = 460.dp,
         ) {
-            item("crux") {
+            item("study") {
+                SettingsGroup("Study") {
                 Section("Your crux", Icons.Rounded.AutoAwesome, if (channels.isEmpty()) "No channels yet" else channels.joinToString(", ") { it.title }, openSection == "crux", { openSection = if (openSection == "crux") "" else "crux" }) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Add YouTube channels", style = MaterialTheme.typography.titleMedium)
@@ -287,9 +345,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                         }
                     }
                 }
-            }
 
-            item("exams") {
                 Section("Your exams", Icons.Rounded.School, settings.exams.joinToString(", ") { shortExam(it) }, openSection == "exams", { openSection = if (openSection == "exams") "" else "exams" }) {
                     AnimatedVisibility(true) {
                         Column {
@@ -312,9 +368,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                         }
                     }
                 }
-            }
 
-            item("papers") {
                 Section("Papers", Icons.Rounded.Newspaper, Sources.builtIn.filter { it.id in settings.enabledSources }.joinToString(", ") { it.name }.ifBlank { "No sources" }, openSection == "papers", { openSection = if (openSection == "papers") "" else "papers" }) {
                     SwitchRow("Page-turn animation", null, settings.pageFlip) { scope.launch { g.prefs.setPageFlip(it) } }
                     SwitchRow("Block ads and trackers", "In the in-app browser", settings.blockAds) { scope.launch { g.prefs.setBlockAds(it) } }
@@ -361,10 +415,12 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                         ) { Text("Add source") }
                     }
                 }
+                }
             }
 
-            item("claude") {
-                Section("AI", Icons.Rounded.Psychology, (if (settings.autoModel) "Automatic model" else settings.modelId.removePrefix("claude-").ifBlank { "Chosen model" }) + " · " + settings.language, openSection == "claude", { openSection = if (openSection == "claude") "" else "claude" }) {
+            item("ai") {
+                SettingsGroup("Crux AI") {
+                Section("Model and language", Icons.Rounded.Psychology, (if (settings.autoModel) "Automatic model" else settings.modelId.removePrefix("claude-").ifBlank { "Chosen model" }) + " · " + settings.language, openSection == "claude", { openSection = if (openSection == "claude") "" else "claude" }) {
                     // A build that ships with its own key shows no key controls at all.
                     if (!g.hasBuiltInKey) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -467,9 +523,12 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                     SwitchRow("Open videos on Detailed", null, settings.preferDetailed) { scope.launch { g.prefs.setPreferDetailed(it) } }
                     SwitchRow("Rate exam relevance automatically", null, settings.aiCurate) { scope.launch { g.prefs.setAiCurate(it) } }
                 }
+                }
             }
 
-            if (g.cloud.available) item("cloud") {
+            item("syncing") {
+                SettingsGroup("Sync") {
+                if (g.cloud.available) {
                 val cloud by g.cloud.status.collectAsState()
                 Section(
                     "Sync across devices", Icons.Rounded.Devices,
@@ -482,10 +541,8 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                     },
                     openSection == "cloud", { openSection = if (openSection == "cloud") "" else "cloud" },
                 ) { CloudPanel(cloud) }
-            }
-
-            item("sync") {
-                Section("Sync", Icons.Rounded.Sync, (if (settings.dailySync) "Daily" else "Manual") + " · last synced " + Dates.ago(settings.lastSync), openSection == "sync", { openSection = if (openSection == "sync") "" else "sync" }) {
+                }
+                Section("Daily sync", Icons.Rounded.Sync, (if (settings.dailySync) "Daily" else "Manual") + " · last synced " + Dates.ago(settings.lastSync), openSection == "sync", { openSection = if (openSection == "sync") "" else "sync" }) {
                     SwitchRow("Daily auto-sync", "Every morning, in the background", settings.dailySync) {
                         scope.launch { g.prefs.setDailySync(it); g.platform.scheduleDailySync(it, settings.wifiOnly) }
                     }
@@ -500,10 +557,12 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                         }
                     }
                 }
+                }
             }
 
-            item("look") {
-                Section("Appearance", Icons.Rounded.Palette, when (settings.themeMode) { "dark" -> "Dark"; "light" -> "Light"; else -> "Follows the phone" }, openSection == "look", { openSection = if (openSection == "look") "" else "look" }) {
+            item("app") {
+                SettingsGroup("App") {
+                Section("Appearance", Icons.Rounded.Palette, when (settings.themeMode) { "dark" -> "Dark"; "light" -> "Light"; else -> if (g.platform.isDesktop) "Follows the system" else "Follows the phone" }, openSection == "look", { openSection = if (openSection == "look") "" else "look" }) {
                     SwitchRow("Dark theme", if (settings.themeMode == "system") "Following the system right now" else null, dark) {
                         scope.launch { g.prefs.setTheme(if (it) "dark" else "light") }
                     }
@@ -515,9 +574,7 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                         scope.launch { g.prefs.setDynamic(it) }
                     }
                 }
-            }
 
-            item("lock") {
                 Section("Security", Icons.Rounded.Lock, if (settings.lockEnabled) "App lock is on" else "App lock is off", openSection == "lock", { openSection = if (openSection == "lock") "" else "lock" }) {
                     SwitchRow("App lock", "Biometrics first, then your PIN. Covers the whole app, including test results", settings.lockEnabled) { on ->
                         if (on) pinSetup = true else pinConfirmFor = "off"
@@ -536,16 +593,16 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                         }
                     }
                 }
-            }
 
-            item("update") {
                 Section("App update", Icons.Rounded.SystemUpdate, "Version " + g.platform.versionName, openSection == "update", { openSection = if (openSection == "update") "" else "update" }) {
                     UpdatePanel(Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
                     SwitchRow("Check for updates automatically", "Once a day, from GitHub", settings.autoUpdate) { scope.launch { g.prefs.setAutoUpdate(it) } }
                 }
+                }
             }
 
-            item("data") {
+            item("yours") {
+                SettingsGroup("Your data") {
                 Section("Data", Icons.Rounded.Storage, "Kept on this device until you reset", openSection == "data", { openSection = if (openSection == "data") "" else "data" }) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
@@ -558,30 +615,13 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
                         ) { Text("Reset app") }
                     }
                 }
-            }
-
-            item("history") {
-                CruxCard(Modifier.fillMaxWidth(), onClick = { nav.push(Screen.History) }) {
-                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("History", style = MaterialTheme.typography.titleLarge)
-                            Text("Every question you asked and every test, with when and where", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null)
-                    }
+                SettingRow("History", "Every question and test, with when and where", Icons.Rounded.History) { nav.push(Screen.History) }
                 }
             }
+
             item("about") {
-                CruxCard(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer, onClick = { nav.push(Screen.About) }) {
-                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("About DCrux", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Text("Developer, source code and licences", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                    }
+                SettingsGroup("About") {
+                    SettingRow("About DCrux", "Developer, privacy, terms and licences", Icons.Rounded.Info) { nav.push(Screen.About) }
                 }
             }
         }
@@ -630,91 +670,113 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
 private fun ColumnScope.CloudPanel(cloud: app.dcrux.sync.CloudStatus) {
     val g = LocalGraph.current
     val scope = rememberCoroutineScope()
-    var entering by rememberSaveable { mutableStateOf(false) }
     var typed by rememberSaveable { mutableStateOf("") }
-    var showCode by remember { mutableStateOf(false) }
-    // Shown straight away on a computer (that is how a phone joins it); behind a tap on a phone, which is more often seen by others.
-    var showQr by remember { mutableStateOf(g.platform.isDesktop) }
     var busy by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
     var confirmErase by remember { mutableStateOf(false) }
-    val pad = Modifier.padding(horizontal = 18.dp)
-    // Reading the other device's QR code with the camera (phones only); the code can always be typed instead.
+    var short by remember { mutableStateOf<String?>(null) }
+    val pad = Modifier.padding(horizontal = 22.dp)
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    // Reading the other device's QR code with the camera (phones only); the short code can always be typed instead.
     val scan = g.platform.rememberQrScanner { scanned ->
         val code = scanned?.let { app.dcrux.sync.CloudSync.fromQr(it) }
-        if (code == null) note = if (scanned == null) "No QR code could be read from that photo. Fill the frame with the code, hold steady, and try again, or type the code." else "That QR code is not a DCrux sync code."
+        if (code == null) note = if (scanned == null) "No QR code could be read from that photo. Fill the frame with the code, hold steady, and try again, or type the 4-character code." else "That QR code is not a DCrux sync code."
         else { busy = true; scope.launch { g.cloud.join(code); busy = false } }
     }
+    // While this sheet is open with sync on, another device can join by a short code. Closing the sheet withdraws it.
+    LaunchedEffect(cloud.on) {
+        short = null
+        if (cloud.on) g.cloud.offerShortCodes { short = it }
+    }
 
-    Text(
-        "Keep your channels, video notes, questions, tests and study settings the same on your phone and your computer, with no account. " +
-            "Everything is encrypted on the device with a key made from your code before it is uploaded, so the service stores data it cannot read. " +
-            "PDFs and page photos are never uploaded.",
-        pad.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
     if (!cloud.on) {
-        if (!entering) {
-            Button(enabled = !busy, modifier = pad.fillMaxWidth(), onClick = {
-                busy = true; note = null
-                scope.launch { g.cloud.enable(); busy = false; showCode = true }
-            }) { Text("Turn on sync on this device") }
-            if (scan != null) FilledTonalButton(enabled = !busy, modifier = pad.fillMaxWidth().padding(top = 6.dp), onClick = { note = null; scan() }) {
-                Icon(Icons.Rounded.QrCodeScanner, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Scan the QR code on another device")
-            }
-            FilledTonalButton(enabled = !busy, modifier = pad.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), onClick = { entering = true; note = null }) { Text("Type a code from another device") }
-        } else {
-            OutlinedTextField(
-                value = typed, onValueChange = { typed = it.take(40) }, modifier = pad.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(24.dp),
-                placeholder = { Text("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX") },
-            )
-            Row(pad.padding(top = 8.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = !busy && typed.isNotBlank(), onClick = {
-                    busy = true; note = null
-                    scope.launch {
-                        val ok = g.cloud.join(typed)
-                        busy = false
-                        if (ok) { entering = false; typed = "" } else note = "That is not a DCrux code. It is 25 letters and digits; check it against the other device."
-                    }
-                }) { Text("Join") }
-                TextButton(onClick = { entering = false; note = null }) { Text("Cancel") }
+        Text(
+            "Keep your channels, video notes, questions, tests and study settings the same on your phone and your computer. No account needed.",
+            pad.padding(bottom = 14.dp), style = MaterialTheme.typography.bodyMedium, color = quiet,
+        )
+        Button(enabled = !busy, modifier = pad.fillMaxWidth(), onClick = {
+            busy = true; note = null
+            scope.launch { g.cloud.enable(); busy = false }
+        }) { Text("Turn on sync on this device") }
+        Text("Already syncing on another device?", pad.padding(top = 22.dp, bottom = 8.dp), style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Open Settings → Sync across devices on it, then type the 4-character code it shows" + (if (scan != null) ", or scan its QR code." else "."),
+            pad.padding(bottom = 10.dp), style = MaterialTheme.typography.bodySmall, color = quiet,
+        )
+        fun join() {
+            if (busy || typed.isBlank()) return
+            busy = true; note = null
+            scope.launch {
+                val short4 = app.dcrux.sync.CloudSync.normaliseShort(typed) != null
+                val result = when {
+                    short4 -> g.cloud.joinShort(typed)
+                    g.cloud.join(typed) -> app.dcrux.sync.ShortJoin.Joined
+                    else -> app.dcrux.sync.ShortJoin.Wrong
+                }
+                busy = false
+                note = when (result) {
+                    app.dcrux.sync.ShortJoin.Joined -> { typed = ""; null }
+                    app.dcrux.sync.ShortJoin.Wrong ->
+                        if (short4) "That code did not match. A code works once and changes every few minutes, so use the one showing on the other device right now."
+                        else "A code is 4 letters and digits. Type the one showing on the other device."
+                    app.dcrux.sync.ShortJoin.Busy -> "Too many codes have been tried. Wait a few minutes" + (if (scan != null) ", or scan the QR code instead." else ".")
+                    app.dcrux.sync.ShortJoin.Offline -> "Could not reach the sync service. Check the connection and try again."
+                }
             }
         }
+        OutlinedTextField(
+            value = typed, onValueChange = { typed = it.take(40).uppercase() }, modifier = pad.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(24.dp),
+            textStyle = MaterialTheme.typography.headlineMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, letterSpacing = 0.3.em, textAlign = TextAlign.Center),
+            placeholder = { Text("Code", Modifier.fillMaxWidth(), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, color = quiet) },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Characters, autoCorrectEnabled = false, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { join() }),
+        )
+        Row(pad.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !busy && typed.isNotBlank(), modifier = Modifier.weight(1f), onClick = { join() }) { Text(if (busy) "Joining" else "Join") }
+            if (scan != null) FilledTonalButton(enabled = !busy, modifier = Modifier.weight(1f), onClick = { note = null; scan() }) {
+                Icon(Icons.Rounded.QrCodeScanner, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Scan QR")
+            }
+        }
+        note?.let { Text(it, pad.padding(bottom = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        cloud.error?.let { Text(it, pad.padding(bottom = 10.dp), style = MaterialTheme.typography.bodySmall, color = quiet) }
     } else {
         val code = remember(cloud.on) { g.cloud.code().orEmpty() }
-        Text(
-            if (g.platform.isDesktop) "On your phone: Settings → Sync across devices → Scan the QR code on another device, then photograph this:"
-            else "To add another device, scan this from it, or type the code below:",
-            pad.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (showQr) QrCode(app.dcrux.sync.CloudSync.qrText(code), pad.widthIn(max = 260.dp).fillMaxWidth().padding(bottom = 4.dp))
-        TextButton(onClick = { showQr = !showQr }, modifier = pad) { Text(if (showQr) "Hide the QR code" else "Show the QR code") }
-        Text("Your code", pad, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(pad.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(pad.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Add another device", style = MaterialTheme.typography.titleMedium)
             Text(
-                if (showCode) code else "•••••-•••••-•••••-•••••-•••••", Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                "On the other device open Settings → Sync across devices, then scan this or type the code.",
+                Modifier.padding(top = 4.dp, bottom = 14.dp), style = MaterialTheme.typography.bodySmall, color = quiet, textAlign = TextAlign.Center,
             )
-            TextButton(onClick = { showCode = !showCode }) { Text(if (showCode) "Hide" else "Show") }
+            QrCode(app.dcrux.sync.CloudSync.qrText(code), Modifier.size(216.dp))
+            Text("or type this code", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.labelLarge, color = quiet)
+            Text(
+                short ?: "····", Modifier.padding(top = 2.dp),
+                style = MaterialTheme.typography.displayMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, letterSpacing = 0.25.em, fontWeight = FontWeight.SemiBold),
+                color = if (short != null) MaterialTheme.colorScheme.primary else quiet, textAlign = TextAlign.Center, maxLines = 1,
+            )
+            Text(
+                if (short != null) "Works once, and a new one appears every few minutes." else "Getting a code…",
+                Modifier.padding(top = 2.dp, bottom = 14.dp), style = MaterialTheme.typography.bodySmall, color = quiet, textAlign = TextAlign.Center,
+            )
+            cloud.error?.let { Text(it, Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalButton(enabled = !cloud.syncing, onClick = { scope.launch { g.cloud.syncNow() } }) { Text(if (cloud.syncing) "Syncing" else "Sync now") }
+                TextButton(onClick = { scope.launch { g.cloud.disable(eraseCloud = false) } }) { Text("Turn off here") }
+            }
+            TextButton(onClick = { confirmErase = true }) { Text("Turn off on all my devices", color = MaterialTheme.colorScheme.error) }
         }
-        Text(
-            "Anyone with this code or its QR code can read your synced data, so keep both to yourself.",
-            pad.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        cloud.error?.let { Text(it, pad.padding(bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-        Row(pad.padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(enabled = !cloud.syncing, onClick = { scope.launch { g.cloud.syncNow() } }) { Text(if (cloud.syncing) "Syncing" else "Sync now") }
-            TextButton(onClick = { scope.launch { g.cloud.disable(eraseCloud = false) } }) { Text("Turn off here") }
-        }
-        TextButton(onClick = { confirmErase = true }, modifier = pad.padding(bottom = 8.dp)) { Text("Turn off and erase the stored copy", color = MaterialTheme.colorScheme.error) }
     }
-    note?.let { Text(it, pad.padding(bottom = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-    if (!cloud.on) cloud.error?.let { Text(it, pad.padding(bottom = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    Text(
+        "Everything is encrypted on your device before it leaves, with a key only your devices hold. The service passes it between them, cannot read it, and never writes it to disk. " +
+            "PDFs and page photos are never sent. Show the QR code and the short code only to your own devices.",
+        pad.padding(top = 6.dp, bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = quiet,
+    )
 
     if (confirmErase) AlertDialog(
         onDismissRequest = { confirmErase = false },
-        title = { Text("Erase the stored copy?") },
-        text = { Text("Sync stops on this device and the encrypted copy on the service is deleted for all your devices. What is on each device stays there.") },
-        confirmButton = { TextButton(onClick = { confirmErase = false; scope.launch { g.cloud.disable(eraseCloud = true) } }) { Text("Erase") } },
+        title = { Text("Turn sync off everywhere?") },
+        text = { Text("Sync stops on this device and on your other devices, and the copy the service was relaying is cleared. What is on each device stays there.") },
+        confirmButton = { TextButton(onClick = { confirmErase = false; scope.launch { g.cloud.disable(eraseCloud = true) } }) { Text("Turn off") } },
         dismissButton = { TextButton(onClick = { confirmErase = false }) { Text("Keep") } },
     )
 }

@@ -5,13 +5,28 @@ import java.io.File
 
 /**
  * Pairs a data folder with other devices from the command line and says what arrived: a way to
- * check sync against a phone without opening the window. Usage: CloudCli <data dir> join <code> | sync | mark <text> | erase | status
+ * check sync against a phone without opening the window. Usage: CloudCli <data dir> join <code> | host [seconds] | sync | mark <text> | erase | status
  */
 fun main(args: Array<String>) {
     val g = desktopGraph(DesktopPlatform(File(args[0]).apply { mkdirs() }))
     runBlocking {
         when (args.getOrNull(1)) {
-            "join" -> println("joined: " + g.cloud.join(args.getOrElse(2) { "" }))
+            // A 4-character code showing on another device, or a full key.
+            "join" -> args.getOrElse(2) { "" }.let { code ->
+                println("joined: " + if (app.dcrux.sync.CloudSync.normaliseShort(code) != null) g.cloud.joinShort(code) else g.cloud.join(code))
+            }
+            // Turns sync on here if it is off, then offers 4-character codes (written to <data dir>/short-code) until one is used or the seconds run out.
+            "host" -> {
+                if (g.cloud.code() == null) g.cloud.enable()
+                val file = File(args[0], "short-code")
+                val before = g.db.asks().all().size
+                kotlinx.coroutines.withTimeoutOrNull(args.getOrElse(2) { "120" }.toLong() * 1000) {
+                    g.cloud.offerShortCodes { code -> file.writeText(code.orEmpty()); println("code: $code") }
+                }
+                file.delete()
+                g.cloud.syncNow()
+                println("questions before/after hosting: $before/" + g.db.asks().all().size)
+            }
             // Prints the air quality the app would show for a city: CloudCli <dir> aqi <name> <lat> <lon> <region>
             "aqi" -> {
                 val w = g.weather.fetch(app.dcrux.data.Place(args[2], args[3].toDouble(), args[4].toDouble(), args.drop(5).joinToString(" ")))

@@ -5,6 +5,11 @@
 // of models, and counts requests per device, per address and overall so one install (or one
 // person with curl) cannot run up the bill. No request or response text is logged or stored.
 //
+// It is a relay, not a store. It writes no user data to disk: AI requests pass straight through, and
+// sync data (already encrypted on the device) is held in memory only while it is passed between a
+// person's devices. The only things it can write are the day's request counters (if a state file is
+// configured) and the list of sync groups that were ended on purpose (addresses only).
+//
 // The limits are set high enough that no real user meets them; they are circuit breakers
 // against abuse, not a ration. Requests are streamed straight through, and connections to
 // the API are kept open between requests, so the relay adds almost no waiting of its own.
@@ -45,13 +50,23 @@ const cfg = {
   // make, and the app, which is in India, fetches the readings directly. The key is then never inside the app
   // package and can be changed here at any time.
   aqiServerFetch: env.DCRUX_AQI_SERVER_FETCH === '1',
-  // Sync across a person's devices: where their encrypted data is kept. The relay cannot read it (the key
-  // never leaves the devices); it only stores and returns it. Unset means sync is not offered.
-  syncDir: env.DCRUX_SYNC_DIR || '',
-  syncMaxTotal: Number(env.DCRUX_SYNC_MAX_TOTAL_BYTES || 2_000_000_000),
+  // Sync across a person's devices. The relay passes each person's (already encrypted) data from one of
+  // their devices to the others and keeps the latest copy IN MEMORY ONLY, so a device that was off can catch
+  // up. Nothing of it is ever written to disk: a restart empties it and the next device to open fills it again.
+  syncOn: env.DCRUX_SYNC === '1' || !!env.DCRUX_SYNC_DIR,
+  // Ceiling on the memory used for those copies; past it, the copies longest untouched are dropped (and refilled by their devices later).
+  syncMaxTotal: Number(env.DCRUX_SYNC_MAX_MEMORY_BYTES || 256_000_000),
+  // The one thing sync writes: the addresses of sync groups their owner ended on purpose, so that an ended
+  // group stays ended across a restart. Addresses only (derived from the pairing code, not reversible to it); no data.
+  syncEndedFile: env.DCRUX_SYNC_ENDED_FILE || '',
   syncWritesDaily: Number(env.DCRUX_SYNC_WRITES_DAILY || 600),
   // Devices waiting to be told that their data changed (one idle connection each); beyond this they are asked to poll slowly instead.
   syncMaxWaiters: Number(env.DCRUX_SYNC_MAX_WAITERS || 20000),
+  // Pairing by a short code. A code lives a few minutes and works once; guesses are limited per address and in all.
+  pairTtlMs: Number(env.DCRUX_PAIR_TTL_SECONDS || 300) * 1000,
+  pairJoinsPerAddress: Number(env.DCRUX_PAIR_JOINS_PER_ADDRESS || 10),     // per 10 minutes
+  pairJoinsHourly: Number(env.DCRUX_PAIR_JOINS_HOURLY || 1000),            // everyone together
+  pairRoomsPerAddress: Number(env.DCRUX_PAIR_ROOMS_PER_ADDRESS || 4),
   upstream: env.DCRUX_UPSTREAM || 'https://api.anthropic.com',
 };
 if (!cfg.apiKey || !cfg.appSecret) {
@@ -156,24 +171,77 @@ let modelsCache = { at: 0, body: null };
 // Real-time sync without polling: a device asks "tell me when version N is no longer the latest" and the answer is
 // held back until that happens (or about 50 seconds pass). An idle held connection costs next to nothing, and nothing
 // is read from disk or sent while a person's data is not changing.
-const syncVersions = new Map();   // id -> latest version, so waiting devices never touch the disk
 const syncWaiters = new Map();    // id -> Set of callbacks
 let syncWaiting = 0;
 function syncChanged(id, version, erased = false) {
-  syncVersions.set(id, { version, erased });
-  if (syncVersions.size > 200000) syncVersions.delete(syncVersions.keys().next().value);
   const set = syncWaiters.get(id);
   if (set) for (const tell of [...set]) tell({ version, erased });
 }
 
-// How much encrypted sync data is stored, counted once at start and kept up to date after that.
-let syncTotal = 0;
-if (cfg.syncDir) {
-  try { fs.mkdirSync(cfg.syncDir, { recursive: true, mode: 0o700 }); for (const f of fs.readdirSync(cfg.syncDir)) syncTotal += fs.statSync(`${cfg.syncDir}/${f}`).size; }
-  catch (e) { console.error('sync folder not usable:', e.message); }
+// The latest encrypted copy for each sync group, held in memory and nowhere else.
+const syncStore = new Map();      // id -> { version, updated, data } or { version, updated, erased: true }
+let syncTotal = 0;                // bytes of data held
+// Versions never repeat, even across a restart that empties the memory: they continue from the clock
+// (seconds since 2026), so a device can always tell "I already have this" from "this is something else".
+const versionFloor = () => Math.floor((Date.now() - Date.UTC(2026, 0, 1)) / 1000);
+function nextVersion(cur) { return Math.max(cur ? cur.version : 0, versionFloor()) + 1; }
+// A version number alone can repeat after a restart (several saves in one second run a little ahead of the clock),
+// so each saved copy also carries a random mark. A device that says "I have version N, mark M" is only told
+// "unchanged" when both match what is held now.
+const newMark = () => crypto.randomBytes(5).toString('hex');
+const sameAsHeld = (have, held) => !!held && !held.erased && (have === `${held.version}.${held.mark}` || have === String(held.version));
+function syncPut(id, entry) {
+  const old = syncStore.get(id);
+  syncTotal += (entry.data ? entry.data.length : 0) - (old && old.data ? old.data.length : 0);
+  syncStore.delete(id); syncStore.set(id, entry);          // re-inserted, so the map stays ordered by last change
+  // Over the memory ceiling: drop the copies untouched for longest. Their devices still hold the data and put it back.
+  for (const [k, v] of syncStore) {
+    if (syncTotal <= cfg.syncMaxTotal) break;
+    if (k === id || !v.data) continue;
+    syncTotal -= v.data.length; syncStore.delete(k);
+  }
+}
+const syncEnded = new Map();      // id -> when it was ended
+function saveEnded() {
+  if (!cfg.syncEndedFile) return;
+  try { fs.writeFileSync(cfg.syncEndedFile, JSON.stringify([...syncEnded]), { mode: 0o600 }); } catch { /* not fatal */ }
+}
+if (cfg.syncEndedFile) {
+  try {
+    const cut = Date.now() - 180 * 86_400_000;
+    for (const [id, at] of JSON.parse(fs.readFileSync(cfg.syncEndedFile, 'utf8'))) {
+      if (at > cut) { syncEnded.set(id, at); syncStore.set(id, { version: nextVersion(null), updated: at, erased: true }); }
+    }
+  } catch { /* none yet */ }
 }
 
 // ---- air quality from CPCB monitors -------------------------------------------------------
+// Pairing by a short code. The device that shares makes a 4-character code and opens a "room"; the device
+// that joins finds the room from the code it was given. The two then agree a key that only someone who knows
+// the code can agree (a password-authenticated key exchange, done on the devices), and the sharing device
+// sends the real sync key locked with it. The relay passes three short messages and learns none of it: the
+// room number is 12 bits of a hash of the code, so it does not even tell the relay which code was used.
+// Rooms live in memory for a few minutes, work once, and are never written anywhere.
+const pairRooms = new Map();      // room -> { token, a, owner, expires, timer, b, tellHost, tellJoiner }
+const pairJoins = new Map();      // address -> times of its recent attempts
+let pairHour = { from: 0, n: 0 };
+function pairClose(room) {
+  const r = pairRooms.get(room);
+  if (!r) return;
+  clearTimeout(r.timer); pairRooms.delete(room);
+  if (r.tellHost) r.tellHost(null);
+  if (r.tellJoiner) r.tellJoiner(null);
+}
+function pairJoinAllowed(address) {
+  const now = Date.now();
+  if (now - pairHour.from > 3_600_000) pairHour = { from: now, n: 0 };
+  const mine = (pairJoins.get(address) || []).filter(t => now - t < 600_000);
+  if (pairHour.n >= cfg.pairJoinsHourly || mine.length >= cfg.pairJoinsPerAddress) { pairJoins.set(address, mine); return false; }
+  mine.push(now); pairJoins.set(address, mine); pairHour.n++;
+  return true;
+}
+setInterval(() => { const now = Date.now(); for (const [k, v] of pairJoins) if (!v.some(t => now - t < 600_000)) pairJoins.delete(k); }, 600_000).unref();
+
 const AQI_RESOURCE = 'https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69';
 const aqiCache = new Map();   // city (lower case) -> { at, data, pending }
 
@@ -261,7 +329,9 @@ async function cityAqi(city, lat, lon) {
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
   const url = new URL(req.url, 'http://x');
-  const log = (status, note = '') => console.log(`${new Date().toISOString()} ${req.method} ${url.pathname} ${status} ${Date.now() - started}ms ${note}`);
+  // A sync address is never written to the log: it would tie a person's requests together.
+  const shownPath = url.pathname.replace(/\/sync\/[0-9a-f]{64}/, '/sync/-').replace(/\/pair\/[0-9a-f]{3}/, '/pair/-');
+  const log = (status, note = '') => console.log(`${new Date().toISOString()} ${req.method} ${shownPath} ${status} ${Date.now() - started}ms ${note}`);
   try {
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); return;
@@ -310,20 +380,86 @@ const server = http.createServer(async (req, res) => {
       } catch (e) { send(res, 502, 'api_error', 'The air-quality data is not available right now.'); return log(502, 'aqi ' + (e?.message || '')); }
     }
 
+    const pairMatch = /^\/v1\/pair\/([0-9a-f]{3})(\/wait|\/join|\/answer)?$/.exec(url.pathname);
+    if (pairMatch) {
+      const room = pairMatch[1], step = pairMatch[2] || '';
+      const wanted = { '': ['PUT', 'DELETE'], '/wait': ['GET'], '/join': ['POST'], '/answer': ['PUT'] }[step];
+      if (!wanted.includes(req.method)) { send(res, 405, 'invalid_request_error', 'Not available.'); return log(405); }
+      let body = Buffer.alloc(0);
+      if (req.method === 'PUT' || req.method === 'POST') {
+        try { body = await readBody(req, 2048); } catch (e) { send(res, e.status || 400, 'invalid_request_error', 'Malformed request.'); return log(e.status || 400, 'pair'); }
+      }
+      if (!checkCaller(req, body)) { send(res, 401, 'authentication_error', 'Unrecognised client.'); return log(401); }
+      if (!cfg.syncOn) { send(res, 503, 'api_error', 'Sync is not set up on this service.'); return log(503, 'sync off'); }
+      const json = (status, obj) => { const b = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(b); };
+      const field = name => { try { const v = JSON.parse(body.toString('utf8'))[name]; return typeof v === 'string' && /^[A-Za-z0-9+/=]{1,400}$/.test(v) ? v : null; } catch { return null; } };
+      const none = () => { send(res, 404, 'not_found_error', 'No device is offering that code right now.'); };
+      const cur = pairRooms.get(room);
+      const mine = cur && cur.token === url.searchParams.get('token') ? cur : null;
+
+      if (step === '' && req.method === 'PUT') {                 // the sharing device opens a room
+        const a = field('a');
+        if (!a) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'pair'); }
+        if (cur) { json(409, { taken: true }); return log(409, 'pair room in use'); }
+        const owner = addressOf(req);
+        let held = 0; for (const r of pairRooms.values()) if (r.owner === owner) held++;
+        if (held >= cfg.pairRoomsPerAddress) { send(res, 429, 'rate_limit_error', 'Too many pairing codes at once. Try again in a few minutes.', { 'retry-after': '120' }); return log(429, 'pair rooms'); }
+        const token = crypto.randomBytes(16).toString('hex');
+        const timer = setTimeout(() => pairClose(room), cfg.pairTtlMs); timer.unref();
+        pairRooms.set(room, { token, a, owner, timer, expires: Date.now() + cfg.pairTtlMs });
+        json(200, { token, ttl: Math.floor(cfg.pairTtlMs / 1000) }); return log(200, 'pair open');
+      }
+      if (step === '' && req.method === 'DELETE') {              // the sharing device withdraws its code
+        if (mine) pairClose(room);
+        json(200, { ok: true }); return log(200, 'pair close');
+      }
+      if (step === '/wait') {                                    // the sharing device waits for someone to enter the code
+        if (!mine) { none(); return log(404, 'pair wait'); }
+        if (mine.b) { json(200, { b: mine.b }); return log(200, 'pair wait'); }
+        if (mine.tellHost) mine.tellHost(null);
+        let done = false;
+        const finish = () => { if (done) return false; done = true; clearTimeout(timer); if (mine.tellHost === tell) mine.tellHost = null; return true; };
+        const tell = b => { if (finish()) { if (b) json(200, { b }); else { res.writeHead(204); res.end(); } } };
+        const timer = setTimeout(() => tell(null), 50_000);
+        mine.tellHost = tell;
+        res.on('close', finish);
+        return;
+      }
+      if (step === '/join') {                                    // the joining device presents its half and waits for the answer
+        const b = field('b');
+        if (!b) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'pair'); }
+        if (!pairJoinAllowed(addressOf(req))) { send(res, 429, 'rate_limit_error', 'Too many codes tried. Wait a few minutes, or scan the QR code instead.', { 'retry-after': '600' }); return log(429, 'pair joins'); }
+        if (!cur || cur.b) { none(); return log(404, 'pair join'); }
+        cur.b = b;
+        let done = false;
+        const finish = () => { if (done) return false; done = true; clearTimeout(timer); cur.tellJoiner = null; return true; };
+        // Answered or not, a code is used up by one attempt: a wrong guess cannot be followed by another on the same code.
+        cur.tellJoiner = e => { if (finish()) { if (e) json(200, { a: cur.a, e }); else none(); } };
+        const timer = setTimeout(() => pairClose(room), 25_000);
+        res.on('close', () => { if (finish()) pairClose(room); });
+        if (cur.tellHost) cur.tellHost(b);
+        return log(200, 'pair join');
+      }
+      // step === '/answer': the sharing device hands over the sync key, locked with the key the two agreed
+      const e = field('e');
+      if (!e) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'pair'); }
+      if (!mine || !mine.b || !mine.tellJoiner) { none(); return log(404, 'pair answer'); }
+      mine.tellJoiner(e);
+      pairClose(room);
+      json(200, { ok: true }); return log(200, 'pair answer');
+    }
+
     const waitMatch = /^\/v1\/sync\/([0-9a-f]{64})\/wait$/.exec(url.pathname);
     if (waitMatch && req.method === 'GET') {
       if (!checkCaller(req, Buffer.alloc(0))) { send(res, 401, 'authentication_error', 'Unrecognised client.'); return log(401); }
-      if (!cfg.syncDir) { send(res, 503, 'api_error', 'Sync is not set up on this service.'); return; }
+      if (!cfg.syncOn) { send(res, 503, 'api_error', 'Sync is not set up on this service.'); return; }
       const id = waitMatch[1];
-      const have = Number(url.searchParams.get('have'));
-      let known = syncVersions.get(id);
-      if (!known) {
-        try { const cur = JSON.parse(fs.readFileSync(`${cfg.syncDir}/${id}.json`, 'utf8')); known = { version: cur.version, erased: !!cur.erased }; }
-        catch { known = { version: 0, erased: false }; }
-        syncVersions.set(id, known);
-      }
+      const have = String(url.searchParams.get('have') || '0');
+      const held = syncStore.get(id);
+      const known = held ? { version: held.version, erased: !!held.erased } : { version: 0, erased: false };
       const reply = v => { const b = JSON.stringify(v); res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(b); };
-      if (known.version !== have) return reply(known);
+      // Nothing held and the device has nothing either: wait. Otherwise wait only if the device has exactly what is held.
+      if (held ? !sameAsHeld(have, held) : Number(have.split('.')[0]) !== 0) return reply(known);
       const set = syncWaiters.get(id) || new Set();
       // Too many waiting (in all, or for one person): answer at once and ask for a slow poll instead.
       if (syncWaiting >= cfg.syncMaxWaiters || set.size >= 8) { res.writeHead(204, { 'retry-after': '60' }); return res.end(); }
@@ -344,48 +480,40 @@ const server = http.createServer(async (req, res) => {
         catch (e) { send(res, e.status || 400, e.status === 413 ? 'request_too_large' : 'invalid_request_error', 'Too much data to sync in one go.'); return log(e.status || 400, 'sync'); }
       }
       if (!checkCaller(req, body)) { send(res, 401, 'authentication_error', 'Unrecognised client.'); return log(401); }
-      if (!cfg.syncDir) { send(res, 503, 'api_error', 'Sync is not set up on this service.'); return log(503, 'sync off'); }
-      const file = `${cfg.syncDir}/${syncMatch[1]}.json`;
+      if (!cfg.syncOn) { send(res, 503, 'api_error', 'Sync is not set up on this service.'); return log(503, 'sync off'); }
+      const id = syncMatch[1];
       const json = (status, obj) => { const b = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(b); };
-      const current = () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+      const cur = syncStore.get(id) || null;
       if (req.method === 'GET') {
-        const cur = current();
-        if (!cur) { send(res, 404, 'not_found_error', 'Nothing is stored for this code yet.'); return log(404, 'sync get'); }
+        if (!cur) { send(res, 404, 'not_found_error', 'Nothing is held for this code right now.'); return log(404, 'sync get'); }
         // A device that already holds this version is told so in a few bytes instead of being sent it again.
-        if (!cur.erased && url.searchParams.get('have') === String(cur.version)) { res.writeHead(304, { 'cache-control': 'no-store' }); res.end(); return log(304, `sync same v${cur.version}`); }
-        json(200, cur); return log(200, `sync get v${cur.version}`);
+        if (sameAsHeld(url.searchParams.get('have'), cur)) { res.writeHead(304, { 'cache-control': 'no-store' }); res.end(); return log(304, 'sync same'); }
+        json(200, cur); return log(200, 'sync get');
       }
       if (req.method === 'DELETE') {
-        // The data goes; a small marker stays, so the person's other devices learn that sync was ended
-        // on purpose and stop, instead of uploading their copy again.
-        const cur = current();
-        const size = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
-        const marker = JSON.stringify({ version: (cur ? cur.version : 0) + 1, updated: Date.now(), erased: true });
-        fs.writeFileSync(file, marker, { mode: 0o600 });
-        syncTotal = Math.max(0, syncTotal - size + marker.length);
-        syncChanged(syncMatch[1], (cur ? cur.version : 0) + 1, true);
+        // The data goes; only the fact that this group was ended stays, so the person's other devices stop
+        // instead of putting their copy back.
+        const marker = { version: nextVersion(cur), updated: Date.now(), erased: true };
+        syncPut(id, marker);
+        syncEnded.set(id, marker.updated); saveEnded();
+        syncChanged(id, marker.version, true);
         json(200, { ok: true }); return log(200, 'sync erase');
       }
       let put;
       try { put = JSON.parse(body.toString('utf8')); } catch { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'sync'); }
       if (typeof put.data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(put.data) || !Number.isInteger(put.base)) { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'sync'); }
       roll();
-      const wk = 's' + syncMatch[1].slice(0, 16);
+      const wk = 's' + id.slice(0, 16);
       if ((counters.devices[wk] || 0) >= cfg.syncWritesDaily) { send(res, 429, 'rate_limit_error', 'Too many sync updates today. It resets tomorrow.', { 'retry-after': '3600' }); return log(429, 'sync writes'); }
-      const cur = current();
       const version = cur ? cur.version : 0;
-      // Two devices saving at once: the second is told to fetch, merge and try again, so neither overwrites the other.
       if (cur && cur.erased) { send(res, 410, 'invalid_request_error', 'Sync for this code was ended and erased.'); return log(410, 'sync erased'); }
-      if (put.base !== version) { json(409, { version }); return log(409, `sync base ${put.base} != ${version}`); }
-      const oldSize = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
-      const next = JSON.stringify({ version: version + 1, updated: Date.now(), data: put.data });
-      if (syncTotal - oldSize + next.length > cfg.syncMaxTotal) { send(res, 507, 'api_error', 'Sync storage is full for now.'); return log(507, 'sync full'); }
-      const tmp = file + '.tmp';
-      fs.writeFileSync(tmp, next, { mode: 0o600 }); fs.renameSync(tmp, file);
-      syncTotal += next.length - oldSize;
+      // Two devices saving at once: the second is told to fetch, merge and try again, so neither overwrites the other.
+      if (put.base !== version) { json(409, { version }); return log(409, 'sync base differs'); }
+      const next = { version: nextVersion(cur), mark: newMark(), updated: Date.now(), data: put.data };
+      syncPut(id, next);
       counters.devices[wk] = (counters.devices[wk] || 0) + 1;
-      syncChanged(syncMatch[1], version + 1);
-      json(200, { version: version + 1 }); return log(200, `sync put v${version + 1} ${next.length}b`);
+      syncChanged(id, next.version);
+      json(200, { version: next.version, mark: next.mark }); return log(200, `sync put ${put.data.length}b`);
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/messages') {

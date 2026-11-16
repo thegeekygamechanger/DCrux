@@ -13,6 +13,7 @@ import app.dcrux.data.Video
 import app.dcrux.mains.MainsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -28,6 +29,8 @@ import okio.ByteString.Companion.toByteString
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.math.BigInteger
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
@@ -78,16 +81,25 @@ data class CloudState(
 private data class SyncMemory(
     val version: Int = 0, val keys: Set<String> = emptySet(), val settingsHash: Int = 0, val settingsAt: Long = 0,
     val noteHash: Map<String, Int> = emptyMap(), val noteAt: Map<String, Long> = emptyMap(),
+    /** Deletions this device knows of. The relay keeps nothing on disk, so the devices are the ones that remember. */
+    val gone: Map<String, Long> = emptyMap(),
+    /** The service's mark on the copy this device last saw. With the version it says exactly which copy that was. */
+    val mark: String = "",
 )
 
 private class ErasedElsewhere : Exception()
 
 data class CloudStatus(val on: Boolean = false, val syncing: Boolean = false, val error: String? = null)
 
+/** How entering a short pairing code ended. */
+enum class ShortJoin { Joined, Wrong, Busy, Offline }
+
 /**
- * Sync across a person's own devices, with no account. One device makes a pairing code and the
- * others enter it. The code never leaves the devices: a key derived from it encrypts everything
- * before upload (AES-256-GCM), so the service stores data it cannot read, under an address that
+ * Sync across a person's own devices, with no account. One device makes a long secret key and the
+ * others receive it, either by scanning its QR code or by typing a 4-character code that is good once
+ * and for a few minutes (see [offerShortCodes]). The key never leaves the devices unprotected: a key derived from it encrypts everything
+ * before upload (AES-256-GCM), so the service only ever handles data it cannot read (and keeps it in memory
+ * only, never on disk, while passing it between the devices), under an address that
  * is also derived from the code. Devices merge rather than overwrite: the union of what each has,
  * the newer of two versions of the same thing, and deletions remembered so they stay deleted.
  */
@@ -109,7 +121,7 @@ class CloudSync(private val g: Graph) {
      * Begins syncing: once now, and from then on whenever something changes, here or on another device.
      * Nothing is polled. While the app is in use it keeps one idle connection open on which the service
      * says "your data changed" the moment another device saves; only then is anything downloaded. A change
-     * made here is uploaded a few seconds after it happens. A slow safety sync covers anything missed.
+     * made here is uploaded within a second of it happening. A slow safety sync covers anything missed.
      */
     fun start() {
         status.value = CloudStatus(on = g.secure.syncSecret() != null)
@@ -137,7 +149,7 @@ class CloudSync(private val g: Graph) {
             while (true) {
                 val secret = g.secure.syncSecret()
                 if (secret == null) { delay(4_000); continue }
-                val have = loadMemory().version
+                val have = loadMemory().let { m -> if (m.mark.isEmpty()) "${m.version}" else "${m.version}.${m.mark}" }
                 val answer = g.claude.serviceCall("GET", "/v1/sync/${Keys(secret).id}/wait?have=$have")
                 when (answer?.first) {
                     200 -> {
@@ -157,7 +169,7 @@ class CloudSync(private val g: Graph) {
     fun syncSoon() {
         if (g.secure.syncSecret() == null) return
         soon?.cancel()
-        soon = g.scope.launch { delay(3_000); syncNow() }
+        soon = g.scope.launch { delay(700); syncNow() }
     }
 
     /** Turns sync on with a new code and uploads what this device has. Returns the code to enter on the other devices. */
@@ -192,6 +204,78 @@ class CloudSync(private val g: Graph) {
 
     private fun forget() { runCatching { memoryFile.delete(); remoteFile.delete() } }
 
+    // ------------------------------------------------------------------ pairing by a short code
+
+    /**
+     * Lets another device join by typing four characters, for as long as this is running (cancel it to stop).
+     * [show] is given each code as it becomes valid, or null while none can be offered.
+     *
+     * Four characters are far too few to be a key, so they are not one. The two devices use the code to agree
+     * a fresh strong key that only someone who knows the code can agree (SPEKE, a password-authenticated key
+     * exchange), and the real sync key crosses locked with that. Whoever watches the exchange learns nothing
+     * to test guesses against; whoever guesses gets one try, because a code is used up by a single attempt
+     * and replaced. A code also lapses by itself after a few minutes.
+     */
+    suspend fun offerShortCodes(show: (String?) -> Unit) {
+        var pause = 2_000L
+        while (true) {
+            val secret = g.secure.syncSecret() ?: return
+            val code = newShort()
+            val x = Pake.exponent()
+            val a = Pake.raise(Pake.base(code), x)
+            if (!Pake.usable(a)) continue
+            val room = Pake.room(code)
+            val made = g.claude.serviceCall("PUT", "/v1/pair/$room", """{"a":"${Pake.text(a)}"}""")
+            if (made?.first == 409) { delay(50); continue }       // another device happens to be using that room: take another code
+            val opened = made?.takeIf { it.first == 200 }?.let { runCatching { AppJson.parseToJsonElement(it.second).jsonObject }.getOrNull() }
+            val token = opened?.get("token")?.jsonPrimitive?.content
+            if (token == null) {
+                show(null)
+                delay(pause.also { pause = minOf(pause * 2, 60_000L) })
+                continue
+            }
+            pause = 2_000L
+            val until = System.currentTimeMillis() + ((opened["ttl"]?.jsonPrimitive?.intOrNull ?: 300) - 15) * 1000L
+            show(code)
+            var answered = false
+            try {
+                var theirs: BigInteger? = null
+                while (theirs == null && System.currentTimeMillis() < until) {
+                    val heard = g.claude.serviceCall("GET", "/v1/pair/$room/wait?token=$token")
+                    when (heard?.first) {
+                        200 -> theirs = runCatching { Pake.number(AppJson.parseToJsonElement(heard.second).jsonObject["b"]!!.jsonPrimitive.content) }.getOrNull() ?: break
+                        204 -> Unit
+                        null -> delay(3_000)
+                        else -> break
+                    }
+                }
+                if (theirs != null && Pake.usable(theirs)) {
+                    val key = Pake.key(a, theirs, Pake.raise(theirs, x))
+                    answered = g.claude.serviceCall("PUT", "/v1/pair/$room/answer?token=$token", """{"e":"${Pake.lock(key, secret)}"}""")?.first == 200
+                }
+            } finally {
+                if (!answered) withContext(NonCancellable) { g.claude.serviceCall("DELETE", "/v1/pair/$room?token=$token") }
+            }
+        }
+    }
+
+    /** Joins the devices of whoever is showing [typed] right now. */
+    suspend fun joinShort(typed: String): ShortJoin {
+        val code = normaliseShort(typed) ?: return ShortJoin.Wrong
+        val y = Pake.exponent()
+        val b = Pake.raise(Pake.base(code), y)
+        val got = g.claude.serviceCall("POST", "/v1/pair/${Pake.room(code)}/join", """{"b":"${Pake.text(b)}"}""") ?: return ShortJoin.Offline
+        if (got.first == 429) return ShortJoin.Busy
+        if (got.first != 200) return if (got.first in 500..599) ShortJoin.Offline else ShortJoin.Wrong
+        val secret = runCatching {
+            val o = AppJson.parseToJsonElement(got.second).jsonObject
+            val a = Pake.number(o["a"]!!.jsonPrimitive.content)!!
+            check(Pake.usable(a))
+            Pake.unlock(Pake.key(a, b, Pake.raise(a, y)), o["e"]!!.jsonPrimitive.content)
+        }.getOrNull() ?: return ShortJoin.Wrong      // the two keys differ: the code typed is not the code shown
+        return if (join(secret)) ShortJoin.Joined else ShortJoin.Wrong
+    }
+
     suspend fun syncNow() {
         val secret = g.secure.syncSecret() ?: return
         if (!lock.tryLock()) return
@@ -222,26 +306,30 @@ class CloudSync(private val g: Graph) {
             // service only a few bytes come back instead of the whole of it.
             val cached = runCatching { remoteFile.takeIf { it.exists() }?.readText()?.split('\n', limit = 2)?.takeIf { it.size == 2 } }.getOrNull()
             val got = g.claude.serviceCall("GET", "/v1/sync/${keys.id}" + (cached?.let { "?have=${it[0]}" } ?: "")) ?: throw IllegalStateException("No connection to the sync service")
-            val (remote, version) = when (got.first) {
-                304 -> (keys.open(cached!![1]) ?: throw IllegalStateException("The saved copy could not be read")) to cached[0].toInt()
+            // Which copy this is: its version, and the service's mark on it when it gave one ("version.mark").
+            val (remote, held) = when (got.first) {
+                304 -> (keys.open(cached!![1]) ?: throw IllegalStateException("The saved copy could not be read")) to cached[0]
                 200 -> {
                     val o = AppJson.parseToJsonElement(got.second).jsonObject
                     if (o["erased"]?.jsonPrimitive?.content == "true") throw ErasedElsewhere()
                     val data = o["data"]?.jsonPrimitive?.content.orEmpty()
                     val state = keys.open(data) ?: throw IllegalStateException("This code does not open the stored data. Check the code.")
-                    val v = o["version"]?.jsonPrimitive?.intOrNull ?: 0
+                    val v = "${o["version"]?.jsonPrimitive?.intOrNull ?: 0}" + (o["mark"]?.jsonPrimitive?.content?.let { ".$it" } ?: "")
                     runCatching { remoteFile.writeText("$v\n$data") }
                     state to v
                 }
-                404 -> CloudState() to 0
+                404 -> CloudState() to "0"
                 503 -> throw IllegalStateException("Sync is not available on the service right now")
                 else -> throw IllegalStateException("The sync service answered ${got.first}")
             }
+            val version = held.substringBefore('.').toIntOrNull() ?: 0
+            var saved = held
             val now = System.currentTimeMillis()
             val first = memory.version == 0 && memory.keys.isEmpty()
             val local = snapshot(memory, now, adoptRemoteSettings = first && remote.settings.at > 0)
             // What this device had at the last exchange and no longer has was deleted here.
             val gone = remote.gone.toMutableMap()
+            memory.gone.forEach { (k, at) -> gone[k] = maxOf(gone[k] ?: 0, at) }
             (memory.keys - keysOf(local)).forEach { k -> gone[k] = maxOf(gone[k] ?: 0, now) }
             val merged = merge(remote, local, gone.filterValues { now - it < 180L * 86_400_000L })
             apply(merged, local)
@@ -250,13 +338,18 @@ class CloudSync(private val g: Graph) {
                 val put = g.claude.serviceCall("PUT", "/v1/sync/${keys.id}", """{"base":$version,"data":"$sealed"}""")
                     ?: throw IllegalStateException("No connection to the sync service")
                 if (put.first == 409) { runCatching { remoteFile.delete() }; return@repeat }   // another device saved meanwhile: fetch, merge and try again
-                if (put.first == 200) runCatching { remoteFile.writeText("${version + 1}\n$sealed") }
+                if (put.first == 200) {
+                    val o = runCatching { AppJson.parseToJsonElement(put.second).jsonObject }.getOrNull()
+                    saved = "${o?.get("version")?.jsonPrimitive?.intOrNull ?: (version + 1)}" + (o?.get("mark")?.jsonPrimitive?.content?.let { ".$it" } ?: "")
+                    runCatching { remoteFile.writeText("$saved\n$sealed") }
+                }
                 if (put.first != 200) throw IllegalStateException(if (put.first == 413) "There is too much to sync in one go" else "The sync service answered ${put.first}")
             }
             memory = SyncMemory(
-                version = if (merged != remote) version + 1 else version, keys = keysOf(merged),
+                version = saved.substringBefore('.').toIntOrNull() ?: 0, mark = saved.substringAfter('.', ""), keys = keysOf(merged),
                 settingsHash = merged.settings.copy(at = 0).hashCode(), settingsAt = merged.settings.at,
                 noteHash = merged.notes.associate { it.id to it.copy(at = 0).hashCode() }, noteAt = merged.notes.associate { it.id to it.at },
+                gone = merged.gone,
             )
             saveMemory(memory)
             return
@@ -399,6 +492,63 @@ class CloudSync(private val g: Graph) {
         }
     }
 
+    /** The arithmetic of pairing by a short code: SPEKE over the 2048-bit group of RFC 3526, with SHA-256 and AES-256-GCM. */
+    private object Pake {
+        // A safe prime: p and (p - 1) / 2 are both prime, so the squares form a group of prime order.
+        val P = BigInteger(
+            "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74" +
+                "020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437" +
+                "4FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED" +
+                "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF05" +
+                "98DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB" +
+                "9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B" +
+                "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF695581718" +
+                "3995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF",
+            16,
+        )
+        private val TWO = BigInteger.valueOf(2)
+
+        private fun sha(vararg parts: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").also { d -> parts.forEach(d::update) }.digest()
+
+        /** The room two devices meet in. Only 12 bits of a hash of the code, so the room does not give the code away. */
+        fun room(code: String): String = sha("dcrux-pair-room|$code".toByteArray()).let { "%03x".format(((it[0].toInt() and 0xff) shl 4) or ((it[1].toInt() and 0xff) shr 4)) }
+
+        /** The code turned into a group element nobody knows a logarithm of: a wide hash, reduced, then squared. */
+        fun base(code: String): BigInteger {
+            val wide = (0 until 9).map { sha("dcrux-pair-v1|$it|$code".toByteArray()) }.reduce { acc, part -> acc + part }
+            return BigInteger(1, wide).mod(P).modPow(TWO, P)
+        }
+
+        fun exponent(): BigInteger = BigInteger(256, SecureRandom()).setBit(255)
+        fun raise(base: BigInteger, e: BigInteger): BigInteger = base.modPow(e, P)
+
+        /** Refuses the few values that would make the agreed key predictable. */
+        fun usable(v: BigInteger): Boolean = v > BigInteger.ONE && v < P - BigInteger.ONE
+
+        private fun fixed(v: BigInteger): ByteArray = v.toByteArray().let { raw ->
+            ByteArray(256).also { out -> val n = minOf(raw.size, 256); raw.copyInto(out, 256 - n, raw.size - n, raw.size) }
+        }
+
+        fun text(v: BigInteger): String = fixed(v).toByteString().base64()
+        fun number(text: String): BigInteger? = text.decodeBase64()?.toByteArray()?.takeIf { it.size == 256 }?.let { BigInteger(1, it) }
+
+        /** The key both sides reach when, and only when, they started from the same code. */
+        fun key(a: BigInteger, b: BigInteger, shared: BigInteger): SecretKeySpec =
+            SecretKeySpec(sha("dcrux-pair-key".toByteArray(), fixed(a), fixed(b), fixed(shared)), "AES")
+
+        fun lock(key: SecretKeySpec, secret: String): String {
+            val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv)) }
+            return (iv + cipher.doFinal(secret.toByteArray())).toByteString().base64()
+        }
+
+        fun unlock(key: SecretKeySpec, locked: String): String? = runCatching {
+            val raw = locked.decodeBase64()!!.toByteArray()
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, raw, 0, 12)) }
+            String(cipher.doFinal(raw, 12, raw.size - 12))
+        }.getOrNull()
+    }
+
     companion object {
         // 25 symbols of 5 bits each: 125 bits, far beyond guessing, and short enough to type once.
         // The alphabet leaves out I, L, O and U so nothing is mistaken for a digit.
@@ -406,6 +556,21 @@ class CloudSync(private val g: Graph) {
         private const val LENGTH = 25
 
         private fun newCode(): String = SecureRandom().let { r -> (1..LENGTH).map { ALPHABET[r.nextInt(32)] }.joinToString("") }
+
+        /** The short pairing code: easy to read out and type, and worth nothing once used or a few minutes old. */
+        const val SHORT_LENGTH = 4
+        private fun newShort(): String = SecureRandom().let { r -> (1..SHORT_LENGTH).map { ALPHABET[r.nextInt(32)] }.joinToString("") }
+
+        private fun cleaned(typed: String): String = typed.uppercase().replace('O', '0').replace('I', '1').replace('L', '1').filter { it.isLetterOrDigit() }
+
+        /** A typed short code, forgiving case and spacing. Null when it cannot be one. */
+        fun normaliseShort(typed: String): String? = cleaned(typed).takeIf { it.length == SHORT_LENGTH && it.all { c -> c in ALPHABET } }
+
+        /** The room a short code leads to (for the self-check). */
+        internal fun roomOf(code: String): String = Pake.room(code)
+
+        /** Whether the numbers pairing rests on are what they should be (for the self-check). */
+        internal fun pairingSound(): Boolean = Pake.P.bitLength() == 2048 && Pake.P.isProbablePrime(40) && Pake.P.shiftRight(1).isProbablePrime(40)
 
         private const val QR_PREFIX = "dcrux-sync:"
 
@@ -420,7 +585,7 @@ class CloudSync(private val g: Graph) {
 
         /** What the user typed, forgiving case, spacing and the letters left out of the alphabet. Null when it cannot be a code. */
         fun normalise(typed: String): String? {
-            val s = typed.uppercase().replace('O', '0').replace('I', '1').replace('L', '1').filter { it.isLetterOrDigit() }
+            val s = cleaned(typed)
             return s.takeIf { it.length == LENGTH && it.all { c -> c in ALPHABET } }
         }
     }

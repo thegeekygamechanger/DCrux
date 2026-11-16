@@ -8,6 +8,7 @@ import app.dcrux.data.TestRecord
 import app.dcrux.data.TestResult
 import app.dcrux.data.Video
 import app.dcrux.mains.MainsStore
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -91,7 +92,7 @@ fun main(args: Array<String>) {
             if (a.db.asks().all().none { it.question == "Arrived in real time?" }) { gone = System.currentTimeMillis() - asked; break }
             kotlinx.coroutines.delay(100)
         }
-        check("a deletion on B reached A by itself (in $gone ms, including the 3 s wait that batches changes)", gone in 0..10_000)
+        check("a deletion on B reached A by itself (in $gone ms, including the short wait that batches changes)", gone in 0..6_000)
         // Idle: with nothing changing, listening devices must not be talking to the service.
         kotlinx.coroutines.delay(6000)
         a.cloud.setActive(false); b.cloud.setActive(false)
@@ -100,6 +101,58 @@ fun main(args: Array<String>) {
         a.sync.removeChannel("chanA")
         a.cloud.syncNow(); b.cloud.syncNow(); a.cloud.syncNow()
         check("the removed channel is gone from both", a.db.channels().get("chanA") == null && b.db.channels().get("chanA") == null)
+
+        // The relay keeps nothing on disk. If it restarts and forgets everything, the devices must put the data
+        // back between them, and something deleted before the restart must stay deleted even when the device
+        // that still has it is the first to return.
+        System.getenv("RELAY_RESTART")?.takeIf { it.isNotBlank() }?.let { restart ->
+            a.db.asks().insert(Ask(articleId = "news9", question = "Deleted before the restart", answer = "x", askedAt = System.currentTimeMillis(), topic = "t"))
+            a.cloud.syncNow(); b.cloud.syncNow()
+            check("both devices have the question that is about to be deleted", b.db.asks().all().any { it.question == "Deleted before the restart" })
+            a.db.asks().all().first { it.question == "Deleted before the restart" }.let { a.db.asks().delete(it.id) }
+            a.cloud.syncNow()                                   // A has deleted it; B has not heard yet
+            val asksOnA = a.db.asks().all().size
+            ProcessBuilder("bash", "-c", restart).inheritIO().start().waitFor()
+            kotlinx.coroutines.delay(1500)
+            check("after the restart the relay holds nothing", a.claude.serviceCall("GET", "/v1/sync/" + "1".repeat(64))?.first == 404)
+            b.cloud.syncNow()                                   // B returns first and uploads its copy, deleted question included
+            a.cloud.syncNow(); b.cloud.syncNow()
+            check("no error after the restart: ${a.cloud.status.value.error} / ${b.cloud.status.value.error}", a.cloud.status.value.error == null && b.cloud.status.value.error == null)
+            check("the deleted question stayed deleted on both", a.db.asks().all().none { it.question == "Deleted before the restart" } && b.db.asks().all().none { it.question == "Deleted before the restart" })
+            check("everything else survived the restart on both", a.db.asks().all().size == asksOnA && b.db.asks().all().size == asksOnA && b.db.videos().get("vid1")?.detailed != null)
+        }
+
+        // Pairing by a 4-character code: A shows codes, a third device C types one.
+        check("the numbers pairing rests on are sound (a 2048-bit safe prime)", app.dcrux.sync.CloudSync.pairingSound())
+        val c = desktopGraph(DesktopPlatform(File(root, "c").apply { mkdirs() }))
+        val shown = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val offering = launch { a.cloud.offerShortCodes { it?.let(shown::add) } }
+        suspend fun codeAfter(n: Int): String? { repeat(100) { if (shown.size > n) return shown[n]; kotlinx.coroutines.delay(100) }; return null }
+        val first = codeAfter(0)
+        check("A shows a 4-character code ($first)", first?.length == 4 && app.dcrux.sync.CloudSync.normaliseShort(first) == first)
+        check("something that is not a code is refused without asking the service", c.cloud.joinShort("hello") == app.dcrux.sync.ShortJoin.Wrong && shown.size == 1)
+        // A wrong code that happens to lead to the same room as the right one: the closest a guesser can get.
+        val alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+        val near = buildList { for (w in alphabet) for (x in alphabet) for (y in alphabet) for (z in alphabet) add("$w$x$y$z") }
+            .first { it != first && app.dcrux.sync.CloudSync.roomOf(it) == app.dcrux.sync.CloudSync.roomOf(first!!) }
+        check("a wrong guess that reaches A gets nothing ($near)", c.cloud.joinShort(near) == app.dcrux.sync.ShortJoin.Wrong && c.cloud.code() == null && c.db.asks().all().isEmpty())
+        val second = codeAfter(1)
+        check("that one guess used the code up: A now shows a new one ($second)", second != null && second != first)
+        check("the used-up code no longer works", c.cloud.joinShort(first!!) == app.dcrux.sync.ShortJoin.Wrong && c.cloud.code() == null)
+        val current = codeAfter(shown.size - 1)!!.let { shown.last() }
+        val began = System.currentTimeMillis()
+        check("C joins with the code A shows, typed in lower case ($current)", c.cloud.joinShort(current.lowercase()) == app.dcrux.sync.ShortJoin.Joined)
+        check("pairing took ${System.currentTimeMillis() - began} ms", System.currentTimeMillis() - began < 5000)
+        check("C now holds the same key as A", c.cloud.code() != null && c.cloud.code() == a.cloud.code())
+        check("C received A's data", c.db.asks().all().size == a.db.asks().all().size && c.db.videos().get("vid1")?.summary != null)
+        offering.cancel(); offering.join()
+        kotlinx.coroutines.delay(300)
+        val last = shown.last()
+        check("when A stops offering, its last code is withdrawn", b.cloud.code() != null && desktopGraph(DesktopPlatform(File(root, "d").apply { mkdirs() })).cloud.joinShort(last) == app.dcrux.sync.ShortJoin.Wrong)
+        // Guessing is rationed: after a handful of tries from one address the service stops answering them.
+        val tries = (1..12).map { c2 -> desktopGraph(DesktopPlatform(File(root, "d").apply { mkdirs() })).cloud.joinShort("ZZZ" + alphabet[c2]) }
+        check("after too many tries the service refuses more (${tries.count { it == app.dcrux.sync.ShortJoin.Busy }} of 12 refused)", tries.last() == app.dcrux.sync.ShortJoin.Busy)
+        c.cloud.disable(eraseCloud = false)
 
         // Nothing changed: a further round must not write.
         val before = a.prefs.get().cloudLastSync
