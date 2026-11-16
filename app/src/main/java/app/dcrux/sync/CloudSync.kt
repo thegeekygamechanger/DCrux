@@ -283,11 +283,11 @@ class CloudSync(private val g: Graph) {
             status.value = CloudStatus(on = true, syncing = true)
             val error = withContext(Dispatchers.IO) { runCatching { exchange(Keys(secret)) }.exceptionOrNull() }
             if (error is ErasedElsewhere) {
-                // Another of the person's devices ended sync and erased the stored copy: stop here too. What is on this device stays.
+                // Another of the person's devices ended sync for the whole group: stop here too. What is on this device stays.
                 g.secure.setSyncSecret(null)
                 forget()
                 g.prefs.setCloudLastSync(0)
-                status.value = CloudStatus(on = false, error = "Sync was turned off and its stored copy erased from another of your devices. Your data on this device is untouched.")
+                status.value = CloudStatus(on = false, error = "Sync was turned off for all your devices from another one of them. Your data on this device is untouched.")
                 return
             }
             if (error == null) g.prefs.setCloudLastSync(System.currentTimeMillis())
