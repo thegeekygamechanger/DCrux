@@ -33,6 +33,11 @@ fun main(args: Array<String>) {
                 println("${args[2]}: AQI ${w.aqi} (${app.dcrux.net.WeatherRepo.aqiWord(w.aqi)}), source=${w.aqiSource}, stations=${w.aqiStations}, worst=${w.aqiWorstStation} ${w.aqiWorst}, peak=${w.aqiPeak}, updated=${w.aqiUpdated}, pm2.5=${w.pm25}")
                 kotlin.system.exitProcess(0)
             }
+            // Sends feedback as the app would: CloudCli <dir> feedback <kind> <email or -> <message...>
+            "feedback" -> {
+                println("feedback: " + (app.dcrux.net.Feedback.send(g, args[2], args.drop(4).joinToString(" "), args[3].takeIf { it != "-" }.orEmpty()) ?: "sent"))
+                kotlin.system.exitProcess(0)
+            }
             "sync" -> g.cloud.syncNow()
             // Ends sync for this code and erases the stored copy (after a test pairing).
             "erase" -> g.cloud.disable(eraseCloud = true)

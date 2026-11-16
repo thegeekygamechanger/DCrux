@@ -15,7 +15,7 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-val appVersion = "1.4.4"
+val appVersion = "1.4.5"
 
 // Android-only files: each has a counterpart of the same name and package in this module, or is not needed here.
 val androidOnly = listOf(
@@ -133,6 +133,15 @@ tasks.register<JavaExec>("syncCheck") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("app.dcrux.desktop.SyncCheckKt")
     args = listOf(layout.buildDirectory.dir("sync-check").get().asFile.path)
+    jvmArgs("-Djava.awt.headless=true")
+}
+
+// Checks search against a small library of titles (see SearchCheck.kt). Needs no network.
+tasks.register<JavaExec>("searchCheck") {
+    group = "verification"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("app.dcrux.desktop.SearchCheckKt")
+    args = listOf(layout.buildDirectory.dir("search-check").get().asFile.path)
     jvmArgs("-Djava.awt.headless=true")
 }
 

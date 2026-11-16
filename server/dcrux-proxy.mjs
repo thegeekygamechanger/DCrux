@@ -67,6 +67,15 @@ const cfg = {
   pairJoinsPerAddress: Number(env.DCRUX_PAIR_JOINS_PER_ADDRESS || 10),     // per 10 minutes
   pairJoinsHourly: Number(env.DCRUX_PAIR_JOINS_HOURLY || 1000),            // everyone together
   pairRoomsPerAddress: Number(env.DCRUX_PAIR_ROOMS_PER_ADDRESS || 4),
+  // Feedback written in the app's Settings is passed on to the developer by email, through Brevo. Where it
+  // goes is set here and nowhere else: the address is never sent to the app and is not in its source.
+  brevoKey: env.BREVO_API_KEY || '',
+  brevoUrl: env.BREVO_URL || 'https://api.brevo.com/v3/smtp/email',
+  feedbackTo: env.DCRUX_FEEDBACK_TO || '',
+  feedbackFrom: env.DCRUX_FEEDBACK_FROM || '',          // a sender address verified in Brevo
+  feedbackPerDevice: Number(env.DCRUX_FEEDBACK_DEVICE_DAILY || 3),
+  feedbackPerAddress: Number(env.DCRUX_FEEDBACK_ADDRESS_DAILY || 10),
+  feedbackDaily: Number(env.DCRUX_FEEDBACK_DAILY || 40),
   upstream: env.DCRUX_UPSTREAM || 'https://api.anthropic.com',
 };
 if (!cfg.apiKey || !cfg.appSecret) {
@@ -214,6 +223,28 @@ if (cfg.syncEndedFile) {
     }
   } catch { /* none yet */ }
 }
+
+// ---- feedback by email
+/** Sends one plain-text email through Brevo. Resolves to the HTTP status. */
+function sendMail({ subject, text, replyTo }) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      sender: { email: cfg.feedbackFrom, name: 'DCrux feedback' },
+      to: [{ email: cfg.feedbackTo }],
+      ...(replyTo ? { replyTo: { email: replyTo } } : {}),
+      subject, textContent: text,
+    });
+    const u = new URL(cfg.brevoUrl);
+    const req = (u.protocol === 'http:' ? http : https).request(u, {
+      method: 'POST',
+      headers: { 'api-key': cfg.brevoKey, 'content-type': 'application/json', accept: 'application/json', 'content-length': Buffer.byteLength(body) },
+    }, r => { r.resume(); r.on('end', () => resolve(r.statusCode)); });
+    req.on('error', reject);
+    req.setTimeout(20_000, () => req.destroy(new Error('timeout')));
+    req.end(body);
+  });
+}
+const oneLine = (v, max) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max);
 
 // ---- air quality from CPCB monitors -------------------------------------------------------
 // Pairing by a short code. The device that shares makes a 4-character code and opens a "room"; the device
@@ -378,6 +409,48 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(body);
         return log(200, `aqi ${data.stations} stations`);
       } catch (e) { send(res, 502, 'api_error', 'The air-quality data is not available right now.'); return log(502, 'aqi ' + (e?.message || '')); }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/feedback') {
+      let body;
+      try { body = await readBody(req, 16_384); } catch (e) { send(res, e.status || 400, 'invalid_request_error', 'That message is too long.'); return log(e.status || 400, 'feedback'); }
+      const device = checkCaller(req, body);
+      if (!device) { send(res, 401, 'authentication_error', 'Unrecognised client.'); return log(401); }
+      if (!cfg.brevoKey || !cfg.feedbackTo || !cfg.feedbackFrom) { send(res, 503, 'api_error', 'Feedback is not set up on this service.'); return log(503, 'feedback off'); }
+      let f;
+      try { f = JSON.parse(body.toString('utf8')); } catch { send(res, 400, 'invalid_request_error', 'Malformed request.'); return log(400, 'feedback'); }
+      const message = String(f && typeof f.message === 'string' ? f.message : '').replace(/\u0000/g, '').trim();
+      const email = oneLine(f && f.email, 254);
+      const kind = ['Problem', 'Idea', 'Other'].includes(f && f.kind) ? f.kind : 'Other';
+      if (message.length < 10 || message.length > 4000) { send(res, 400, 'invalid_request_error', 'Write a little more (10 to 4000 characters).'); return log(400, 'feedback length'); }
+      if (email && !/^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]{2,}$/.test(email)) { send(res, 400, 'invalid_request_error', 'That email address does not look right.'); return log(400, 'feedback email'); }
+      roll();
+      const dk = 'f' + short(device), ak = 'f' + short(addressOf(req));
+      counters.feedback = counters.feedback || 0;
+      const limited =
+        counters.feedback >= cfg.feedbackDaily ? 'The feedback box is full for today. Please try again tomorrow.' :
+        (counters.devices[dk] || 0) >= cfg.feedbackPerDevice || (counters.addresses[ak] || 0) >= cfg.feedbackPerAddress ? 'You have sent a few messages today already. Please send more tomorrow.' : null;
+      if (limited) { send(res, 429, 'rate_limit_error', limited, { 'retry-after': '3600' }); return log(429, 'feedback'); }
+      counters.feedback++; counters.devices[dk] = (counters.devices[dk] || 0) + 1; counters.addresses[ak] = (counters.addresses[ak] || 0) + 1;
+      const text = [
+        `Kind: ${kind}`,
+        `Reply to: ${email || '(no address given)'}`,
+        `App: ${oneLine(f.app, 80) || 'unknown'}`,
+        `Install: ${short(device)}`,
+        `Sent: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`,
+        '', message,
+      ].join('\n');
+      let status = 0;
+      try { status = await sendMail({ subject: `DCrux ${kind.toLowerCase()}: ${oneLine(message, 60)}`, text, replyTo: email }); } catch { status = 0; }
+      if (status < 200 || status >= 300) {
+        // Not sent: it does not count against the day.
+        counters.feedback--; counters.devices[dk]--; counters.addresses[ak]--;
+        send(res, 502, 'api_error', 'Could not send it just now. Please try again in a while.'); return log(502, `feedback mail ${status}`);
+      }
+      save();
+      const b = '{"ok":true}';
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(b);
+      return log(200, 'feedback');     // the message itself is never logged or kept
     }
 
     const pairMatch = /^\/v1\/pair\/([0-9a-f]{3})(\/wait|\/join|\/answer)?$/.exec(url.pathname);

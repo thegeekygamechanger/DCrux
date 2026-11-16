@@ -92,6 +92,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.layout.Layout
 import app.dcrux.Graph
 import app.dcrux.ai.AiRepo
 import app.dcrux.ai.ClaudeException
@@ -149,6 +152,26 @@ fun starsFor(correct: Int, total: Int): Int {
 }
 
 // ------------------------------------------------------------------ tab
+
+/**
+ * Two blocks side by side at equal width and, when they are close in height, equal height too, so their
+ * edges line up. When the right one grows much taller (its options are open) the left keeps its own height.
+ */
+@Composable
+private fun SideBySide(gap: Dp, left: @Composable () -> Unit, right: @Composable () -> Unit) {
+    Layout(content = {
+        Box(propagateMinConstraints = true) { left() }
+        Box(propagateMinConstraints = true) { right() }
+    }) { measurables, constraints ->
+        val space = gap.roundToPx()
+        val w = ((constraints.maxWidth - space) / 2).coerceAtLeast(0)
+        val leftOwn = measurables[0].minIntrinsicHeight(w)
+        val r = measurables[1].measure(Constraints(minWidth = w, maxWidth = w, minHeight = leftOwn))
+        val together = r.height <= leftOwn + 96.dp.roundToPx()
+        val l = measurables[0].measure(if (together) Constraints.fixed(w, r.height) else Constraints(minWidth = w, maxWidth = w, minHeight = leftOwn))
+        layout(constraints.maxWidth, maxOf(l.height, r.height)) { l.place(0, 0); r.place(w + space, 0) }
+    }
+}
 
 /** The Prelims / Mains switch: two halves of one pill, the chosen one filled. */
 @Composable
@@ -227,6 +250,160 @@ fun TestsTab(settings: Settings) {
         if (draft != null) replaceAsk = begin else begin()
     }
 
+    // The three blocks above the history. On a phone they are stacked; in a wide window the switch and the
+    // score sit beside the new-test card, edge to edge and the same height.
+    val wide = LocalWide.current
+    // An attempt in progress, being evaluated, or just evaluated while you were elsewhere.
+    val ev = evaluation
+    val d = draft
+    val showDraft = mains && (d != null || ev?.doneId != null)
+    val statsCard: @Composable (Modifier) -> Unit = { m ->
+        val stars = results.sumOf { it.second.stars }
+        val avg = if (results.isEmpty()) 0 else results.sumOf { it.second.percent } / results.size
+        Box(m.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(Brush.linearGradient(BrandColors)).padding(20.dp), contentAlignment = Alignment.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("$stars", color = Color.White, style = MaterialTheme.typography.displayMedium)
+                    Text("stars earned", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.labelLarge)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(if (mains) "${results.size} Mains sets" else "${results.size} tests", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    Text("$avg% average", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Lock, null, Modifier.size(14.dp), tint = Color.White)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Encrypted on this device", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+    }
+    val draftCard: @Composable () -> Unit = {
+        CruxCard(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val ink = MaterialTheme.colorScheme.onPrimaryContainer
+                if (ev?.doneId != null) {
+                    Text("Your evaluation is ready", style = MaterialTheme.typography.titleLarge, color = ink)
+                    Button(onClick = {
+                        g.mains.clearProgress()
+                        nav.push(Screen.TestReview(ev.doneId, fresh = true, shown = if (ev.improved) null else ev.result, note = retakeNote(ev.improved, ev.previous, ev.result)))
+                    }) { Text("See the result") }
+                } else if (d != null) {
+                    val done = d.pages.count { it.isNotEmpty() }
+                    Text(if (ev?.running == true) "Evaluating your answers" else "Unfinished attempt", style = MaterialTheme.typography.titleLarge, color = ink)
+                    Text("${d.title} · $done of ${d.questions.size} answers photographed", style = MaterialTheme.typography.bodyMedium, color = ink)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { nav.push(Screen.MainsRun) }) { Text(if (ev?.running == true) "Open" else "Resume") }
+                        if (ev?.running != true) TextButton(onClick = { g.mains.discard() }) { Text("Discard") }
+                    }
+                }
+            }
+        }
+    }
+    val builderCard: @Composable (Modifier) -> Unit = { m ->
+        CruxCard(m, color = MaterialTheme.colorScheme.surfaceContainer) {
+            Column(Modifier.padding(18.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (busy) {
+                    if (mains) CruxLoader("Setting your Mains questions", "$mainsCount questions of $marks marks for ${shortExam(exam)}")
+                    else CruxLoader("Writing your test", "$count $difficulty questions for ${shortExam(exam)}")
+                    StopButton({ buildJob?.cancel(); busy = false }, Modifier.align(Alignment.CenterHorizontally))
+                    return@Column
+                }
+                Text(if (mains) "New Mains set" else "New test", style = MaterialTheme.typography.titleLarge)
+                if (mains) Text(
+                    "Write each answer on paper against the clock, photograph the pages, and get them read and marked like a mentor would.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val turn by animateFloatAsState(if (optionsOpen) 180f else 0f, label = "options")
+                Row(
+                    Modifier.fillMaxWidth().clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable { optionsOpen = !optionsOpen }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (mains) "${shortExam(exam)} · ${Dates.prettyDay(day)} · $difficulty · $mainsCount × $marks marks"
+                        else "${shortExam(exam)} · ${Dates.prettyDay(day)} · $difficulty · $count questions",
+                        Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Icon(Icons.Rounded.ExpandMore, if (optionsOpen) "Hide options" else "Show options", Modifier.rotate(turn))
+                }
+                AnimatedVisibility(optionsOpen) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Exam", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            exams.forEach { e -> FilterChip(selected = e == exam, onClick = { exam = e }, label = { Text(shortExam(e)) }, shape = CircleShape) }
+                        }
+                        Text("News of", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            days.forEach { dk -> FilterChip(selected = dk == day, onClick = { day = dk }, label = { Text(Dates.prettyDay(dk)) }, shape = CircleShape) }
+                        }
+                        Text("Difficulty", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            listOf("Easy", "Moderate", "Hard").forEachIndexed { i, df ->
+                                SegmentedButton(selected = difficulty == df, onClick = { difficulty = df }, shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text(df) }
+                            }
+                        }
+                        if (mains) {
+                            Text("Marks per question", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                listOf(10, 15).forEachIndexed { i, m ->
+                                    SegmentedButton(selected = marks == m, onClick = { marks = m }, shape = SegmentedButtonDefaults.itemShape(i, 2)) {
+                                        Text("$m marks · ${AiRepo.wordsFor(m)} words")
+                                    }
+                                }
+                            }
+                            Text("Questions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                listOf(1, 2, 3, 5).forEachIndexed { i, n ->
+                                    SegmentedButton(selected = mainsCount == n, onClick = { mainsCount = n }, shape = SegmentedButtonDefaults.itemShape(i, 4)) { Text("$n") }
+                                }
+                            }
+                        } else {
+                            Text("Questions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                listOf(5, 10, 15, 20).forEachIndexed { i, n ->
+                                    SegmentedButton(selected = count == n, onClick = { count = n }, shape = SegmentedButtonDefaults.itemShape(i, 4)) { Text("$n") }
+                                }
+                            }
+                        }
+                    }
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+                fun generate() {
+                    busy = true; error = null
+                    buildJob = scope.launch {
+                        try {
+                            val title = "${shortExam(exam)} · ${Dates.prettyDay(day)}"
+                            if (mains) {
+                                val qs = g.ai.generateMains(day, exam, difficulty, mainsCount, marks)
+                                g.mains.start("$title · Mains", exam, difficulty, day, qs)
+                                nav.push(Screen.MainsRun)
+                            } else {
+                                val qs = g.ai.generateQuiz(day, exam, difficulty, count)
+                                nav.push(Screen.TestRun(title, exam, difficulty, day, qs))
+                            }
+                        } catch (e: ClaudeException) {
+                            error = e.friendly
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = e.message ?: "Could not build the test"
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+                Button(
+                    enabled = hasKey, modifier = Modifier.fillMaxWidth().height(54.dp),
+                    onClick = { if (mains) startMains { generate() } else generate() },
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                    Text(if (!hasKey) "Needs an AI key" else if (mains) "Set the questions" else "Generate test")
+                }
+            }
+        }
+    }
+
     CruxList(
         Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + bottomBarInset()),
@@ -239,158 +416,23 @@ fun TestsTab(settings: Settings) {
             }
         }
 
-        item("mode", full = true) { Box(Modifier.fillMaxWidth()) { Box(Modifier.widthIn(max = 560.dp)) { ModeSwitch(mains) { mains = it; error = null } } } }
-
-        item("stats") {
-            val stars = results.sumOf { it.second.stars }
-            val avg = if (results.isEmpty()) 0 else results.sumOf { it.second.percent } / results.size
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(Brush.linearGradient(BrandColors)).padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("$stars", color = Color.White, style = MaterialTheme.typography.displayMedium)
-                        Text("stars earned", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.labelLarge)
+        if (wide) item("top", full = true) {
+            SideBySide(
+                16.dp,
+                left = {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        ModeSwitch(mains) { mains = it; error = null }
+                        statsCard(Modifier.weight(1f))
+                        if (showDraft) draftCard()
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(if (mains) "${results.size} Mains sets" else "${results.size} tests", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                        Text("$avg% average", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Lock, null, Modifier.size(14.dp), tint = Color.White)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Encrypted on this device", color = Color.White, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-        }
-
-        // An attempt in progress, being evaluated, or just evaluated while you were elsewhere.
-        val ev = evaluation
-        val d = draft
-        if (mains && (d != null || ev?.doneId != null)) item("draft") {
-            CruxCard(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val ink = MaterialTheme.colorScheme.onPrimaryContainer
-                    if (ev?.doneId != null) {
-                        Text("Your evaluation is ready", style = MaterialTheme.typography.titleLarge, color = ink)
-                        Button(onClick = {
-                            g.mains.clearProgress()
-                            nav.push(Screen.TestReview(ev.doneId, fresh = true, shown = if (ev.improved) null else ev.result, note = retakeNote(ev.improved, ev.previous, ev.result)))
-                        }) { Text("See the result") }
-                    } else if (d != null) {
-                        val done = d.pages.count { it.isNotEmpty() }
-                        Text(if (ev?.running == true) "Evaluating your answers" else "Unfinished attempt", style = MaterialTheme.typography.titleLarge, color = ink)
-                        Text("${d.title} · $done of ${d.questions.size} answers photographed", style = MaterialTheme.typography.bodyMedium, color = ink)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { nav.push(Screen.MainsRun) }) { Text(if (ev?.running == true) "Open" else "Resume") }
-                            if (ev?.running != true) TextButton(onClick = { g.mains.discard() }) { Text("Discard") }
-                        }
-                    }
-                }
-            }
-        }
-
-        item("builder") {
-            CruxCard(color = MaterialTheme.colorScheme.surfaceContainer) {
-                Column(Modifier.padding(18.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (busy) {
-                        if (mains) CruxLoader("Setting your Mains questions", "$mainsCount questions of $marks marks for ${shortExam(exam)}")
-                        else CruxLoader("Writing your test", "$count $difficulty questions for ${shortExam(exam)}")
-                        StopButton({ buildJob?.cancel(); busy = false }, Modifier.align(Alignment.CenterHorizontally))
-                        return@Column
-                    }
-                    Text(if (mains) "New Mains set" else "New test", style = MaterialTheme.typography.titleLarge)
-                    if (mains) Text(
-                        "Write each answer on paper against the clock, photograph the pages, and get them read and marked like a mentor would.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    val turn by animateFloatAsState(if (optionsOpen) 180f else 0f, label = "options")
-                    Row(
-                        Modifier.fillMaxWidth().clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable { optionsOpen = !optionsOpen }.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (mains) "${shortExam(exam)} · ${Dates.prettyDay(day)} · $difficulty · $mainsCount × $marks marks"
-                            else "${shortExam(exam)} · ${Dates.prettyDay(day)} · $difficulty · $count questions",
-                            Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                        Icon(Icons.Rounded.ExpandMore, if (optionsOpen) "Hide options" else "Show options", Modifier.rotate(turn))
-                    }
-                    AnimatedVisibility(optionsOpen) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Exam", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                exams.forEach { e -> FilterChip(selected = e == exam, onClick = { exam = e }, label = { Text(shortExam(e)) }, shape = CircleShape) }
-                            }
-                            Text("News of", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                days.forEach { dk -> FilterChip(selected = dk == day, onClick = { day = dk }, label = { Text(Dates.prettyDay(dk)) }, shape = CircleShape) }
-                            }
-                            Text("Difficulty", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                listOf("Easy", "Moderate", "Hard").forEachIndexed { i, df ->
-                                    SegmentedButton(selected = difficulty == df, onClick = { difficulty = df }, shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text(df) }
-                                }
-                            }
-                            if (mains) {
-                                Text("Marks per question", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    listOf(10, 15).forEachIndexed { i, m ->
-                                        SegmentedButton(selected = marks == m, onClick = { marks = m }, shape = SegmentedButtonDefaults.itemShape(i, 2)) {
-                                            Text("$m marks · ${AiRepo.wordsFor(m)} words")
-                                        }
-                                    }
-                                }
-                                Text("Questions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    listOf(1, 2, 3, 5).forEachIndexed { i, n ->
-                                        SegmentedButton(selected = mainsCount == n, onClick = { mainsCount = n }, shape = SegmentedButtonDefaults.itemShape(i, 4)) { Text("$n") }
-                                    }
-                                }
-                            } else {
-                                Text("Questions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    listOf(5, 10, 15, 20).forEachIndexed { i, n ->
-                                        SegmentedButton(selected = count == n, onClick = { count = n }, shape = SegmentedButtonDefaults.itemShape(i, 4)) { Text("$n") }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-                    fun generate() {
-                        busy = true; error = null
-                        buildJob = scope.launch {
-                            try {
-                                val title = "${shortExam(exam)} · ${Dates.prettyDay(day)}"
-                                if (mains) {
-                                    val qs = g.ai.generateMains(day, exam, difficulty, mainsCount, marks)
-                                    g.mains.start("$title · Mains", exam, difficulty, day, qs)
-                                    nav.push(Screen.MainsRun)
-                                } else {
-                                    val qs = g.ai.generateQuiz(day, exam, difficulty, count)
-                                    nav.push(Screen.TestRun(title, exam, difficulty, day, qs))
-                                }
-                            } catch (e: ClaudeException) {
-                                error = e.friendly
-                            } catch (e: kotlinx.coroutines.CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                error = e.message ?: "Could not build the test"
-                            } finally {
-                                busy = false
-                            }
-                        }
-                    }
-                    Button(
-                        enabled = hasKey, modifier = Modifier.fillMaxWidth().height(54.dp),
-                        onClick = { if (mains) startMains { generate() } else generate() },
-                    ) {
-                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-                        Text(if (!hasKey) "Needs an AI key" else if (mains) "Set the questions" else "Generate test")
-                    }
-                }
-            }
+                },
+                right = { builderCard(Modifier.fillMaxWidth()) },
+            )
+        } else {
+            item("mode", full = true) { ModeSwitch(mains) { mains = it; error = null } }
+            item("stats") { statsCard(Modifier) }
+            if (showDraft) item("draft") { draftCard() }
+            item("builder") { builderCard(Modifier) }
         }
 
         item("hh", full = true) {

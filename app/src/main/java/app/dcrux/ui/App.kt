@@ -1,5 +1,10 @@
 package app.dcrux.ui
 
+import androidx.compose.foundation.layout.offset
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.tween
 import app.dcrux.ui.components.LocalWide
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -193,7 +198,16 @@ private fun TabsScreen(nav: Nav, settings: Settings, host: Host) {
     Box(Modifier.fillMaxSize().appBackground()) {
         AnimatedContent(
             nav.tab, if (wide) Modifier.fillMaxSize().padding(start = 212.dp) else Modifier.fillMaxSize(),
-            transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.97f)) togetherWith fadeOut() }, label = "tabs",
+            transitionSpec = {
+                if (!wide) (fadeIn() + scaleIn(initialScale = 0.97f)) togetherWith fadeOut()
+                else {
+                    // Beside a vertical rail the page follows the highlight: it eases in from the side you moved towards.
+                    val dir = if (targetState > initialState) 1 else -1
+                    (fadeIn(tween(240, delayMillis = 50)) + slideInVertically(spring(dampingRatio = 0.9f, stiffness = 300f)) { dir * it / 16 }) togetherWith
+                        (fadeOut(tween(110)) + slideOutVertically(tween(160)) { -dir * it / 24 })
+                }
+            },
+            label = "tabs",
         ) { tab ->
             holder.SaveableStateProvider("tab$tab") {
                 when (tab) {
@@ -207,22 +221,27 @@ private fun TabsScreen(nav: Nav, settings: Settings, host: Host) {
         }
 
         // Landscape: the same five places as a rail down the left side, each with its name.
-        if (wide) Column(
+        if (wide) Box(
             Modifier.align(Alignment.CenterStart).padding(start = 16.dp).width(180.dp).clip(RoundedCornerShape(32.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh).border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), RoundedCornerShape(32.dp)).padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            tabs.forEachIndexed { i, t ->
-                val selected = nav.tab == i
-                val bg by animateColorAsState(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, label = "railBg")
-                val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, label = "railTint")
-                Row(
-                    Modifier.fillMaxWidth().height(52.dp).clip(CircleShape).background(bg)
-                        .selectable(selected = selected, role = Role.Tab, onClick = { nav.tab = i }).padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(if (selected) t.on else t.off, null, Modifier.size(24.dp), tint = tint)
-                    Text(t.label, Modifier.padding(start = 12.dp), color = tint, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            // One highlight that glides from the place you were to the place you chose, as the pill does on a phone.
+            val slot = 56.dp
+            val at by animateDpAsState(slot * nav.tab, spring(dampingRatio = 0.72f, stiffness = 380f), label = "railAt")
+            Box(Modifier.offset(y = at).fillMaxWidth().height(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                tabs.forEachIndexed { i, t ->
+                    val selected = nav.tab == i
+                    val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, label = "railTint")
+                    val scale by animateFloatAsState(if (selected) 1.12f else 1f, spring(dampingRatio = 0.45f, stiffness = 380f), label = "railIcon")
+                    Row(
+                        Modifier.fillMaxWidth().height(52.dp).clip(CircleShape)
+                            .selectable(selected = selected, role = Role.Tab, onClick = { nav.tab = i }).padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(if (selected) t.on else t.off, null, Modifier.size(24.dp).graphicsLayer { scaleX = scale; scaleY = scale }, tint = tint)
+                        Text(t.label, Modifier.padding(start = 12.dp), color = tint, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
                 }
             }
         }

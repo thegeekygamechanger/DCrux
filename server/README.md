@@ -43,6 +43,11 @@ and the relay adds the key and forwards them.
     million codes was used: a relay that wanted to cheat would get one guess in about 256, once.
   - A room lives in memory for `DCRUX_PAIR_TTL_SECONDS`, is used up by a single join attempt whether
     right or wrong, and is never written anywhere. Join attempts are rationed per address and overall.
+- **Feedback:** `POST /v1/feedback` with `{kind, message, email, app}`. The relay checks it, rations it (per
+  install, per address and overall, per day) and passes it on by email through Brevo to the address in
+  `DCRUX_FEEDBACK_TO`, with the writer's own address as reply-to when they gave one. That destination
+  exists only in the relay's settings: it is never sent to the app and is not in the source. The message
+  is not logged and no copy is kept.
 - **Air quality:** `GET /v1/aqi?city=&lat=&lon=` for India's official AQI (CPCB monitors, via data.gov.in).
   data.gov.in answers only from inside India, so a relay hosted elsewhere hands the app the request
   to make and the app fetches the readings itself; the key is never inside the app package.
@@ -94,6 +99,10 @@ that log would otherwise record addresses and paths.
 | `DCRUX_PAIR_ROOMS_PER_ADDRESS` | `4` | Pairing codes one network address may be offering at once |
 | `DCRUX_SYNC_MAX_WAITERS` | `20000` | Devices that may wait at once to be told of a change (`GET /v1/sync/<id>/wait`, an idle connection each); beyond it they are asked to check once a minute |
 | `DCRUX_SYNC_WRITES_DAILY` | `600` | Sync uploads per person per day |
+| `BREVO_API_KEY` | none | A Brevo (transactional email) API key, for passing feedback on. Without it, or without the two addresses below, the feedback form answers "not set up". |
+| `DCRUX_FEEDBACK_TO` | none | Where feedback is sent. Kept only here. |
+| `DCRUX_FEEDBACK_FROM` | none | The sender address, one verified in the Brevo account |
+| `DCRUX_FEEDBACK_DEVICE_DAILY` / `_ADDRESS_DAILY` / `DCRUX_FEEDBACK_DAILY` | `3` / `10` / `40` | Feedback messages a day per install, per network address, and in all |
 | `DATAGOV_API_KEY` | none | Your free key from data.gov.in, for India's official AQI from the CPCB monitors. data.gov.in only answers from inside India, so by default `GET /v1/aqi` gives the app (over the signed channel) the request to make and the app fetches the readings itself; the key is never inside the app package. Without the key the app shows its own estimate. |
 | `DCRUX_AQI_SERVER_FETCH` | off | Set to `1` on a relay hosted in India: it then fetches the readings itself and serves one cached answer per city for an hour. |
 

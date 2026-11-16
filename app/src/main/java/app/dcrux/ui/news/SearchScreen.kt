@@ -1,5 +1,8 @@
 package app.dcrux.ui.news
 
+import app.dcrux.data.SearchTerms
+import app.dcrux.data.search
+import app.dcrux.data.searchCount
 import app.dcrux.LocalGraph
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -117,9 +120,10 @@ fun SearchSheet(settings: Settings, onDismiss: () -> Unit) {
     LaunchedEffect(q, page) {
         if (q.length < 2) { videos = emptyList(); news = emptyList(); newsTotal = 0; return@LaunchedEffect }
         delay(250)
-        videos = if (page == 0) g.db.videos().search(q, 6) else emptyList()
-        news = g.db.news().search(q, size, page * size)
-        newsTotal = g.db.news().searchCount(q)
+        val terms = SearchTerms.of(q)
+        videos = if (page == 0) g.db.videos().search(terms, 8) else emptyList()
+        news = g.db.news().search(terms, size, page * size)
+        newsTotal = g.db.news().searchCount(terms)
     }
 
     fun writeOverview() {
@@ -131,8 +135,9 @@ fun SearchSheet(settings: Settings, onDismiss: () -> Unit) {
             // The overview is the first row; make sure it is the one on screen.
             launch { listState.animateScrollToItem(0) }
             try {
-                val v = g.db.videos().search(q, 4)
-                val n = g.db.news().search(q, 10, 0)
+                val terms = SearchTerms.of(q)
+                val v = g.db.videos().search(terms, 4)
+                val n = g.db.news().search(terms, 10, 0)
                 val hits = v.map { it.title to (it.summary ?: it.detailed ?: it.description).take(700) } +
                     n.map { "${Sources.byId(settings, it.sourceId)?.name ?: it.sourceId}: ${it.title}" to listOfNotNull(it.snippet, it.note).joinToString(" ") }
                 if (hits.isEmpty()) { overviewError = "Nothing synced matches this yet."; return@launch }
@@ -208,8 +213,8 @@ fun SearchSheet(settings: Settings, onDismiss: () -> Unit) {
                 }
             }
             when {
-                q.length < 2 -> item("hint") { EmptyState("Search your library", "Everything you have synced: video titles, summaries, headlines and AI notes.") }
-                videos.isEmpty() && news.isEmpty() -> item("none") { EmptyState("No matches", "Try a different word, or pull down on Crux to sync more.") }
+                q.length < 2 -> item("hint") { EmptyState("Search your library", "Everything you have synced: video titles, summaries, headlines and AI notes. Words can be in any order, and a date such as 14 nov works too.") }
+                videos.isEmpty() && news.isEmpty() -> item("none") { EmptyState("No matches", "Try fewer or different words, or sync on the Crux screen to bring in more.") }
                 else -> {
                     if (videos.isNotEmpty()) {
                         item("vh") { Text("Videos", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp)) }

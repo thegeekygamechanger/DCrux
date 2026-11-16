@@ -78,7 +78,8 @@ from) and arrive on the computer through sync.
 | **Tests: Prelims** | Multiple-choice tests generated from the day's headlines for the exam and difficulty you choose, each question with a relevance score. Retake a test to beat your score. Results earn stars, are stored encrypted, and can be viewed or shared as a PDF made in memory and never saved. |
 | **Tests: Mains** | Descriptive questions set from the day's news. Write on paper against the clock, photograph or upload the pages, and Crux AI reads the handwriting and marks it like a mentor: a marked copy (each section with a tick or cross and a short remark), marks by criterion, mistakes quoted from your answer, what to fix first, a topper's outline and time advice. The reading it marked from is always shown. |
 | **Mind Flow** | Fifteen soothing sounds (rain, ocean, fire, binaural tones and more), synthesised on the phone in real time. Mix them, set a sleep timer, control playback from the notification. |
-| **Search** | Slides up over any screen and searches everything synced, with an optional AI overview written only from the matching results. |
+| **Search** | Slides up over any screen and searches everything synced: video titles and notes, channel names, headlines and their AI notes. Words can be in any order, a date such as `14 nov` or `14/11` is understood, and results with more of your words (and more of them in the title) come first. An optional AI overview is written only from the matching results. |
+| **Feedback** | Settings → Send feedback: a short form that reaches the developer by email through the relay. The app never holds the address it goes to. |
 | **Privacy** | App lock with biometrics and a PIN. Backups are off. No analytics. Location is optional and city-level only. The in-app Privacy sheet lists exactly what leaves the phone. |
 
 Kotlin, Jetpack Compose, Material 3 Expressive.
@@ -163,6 +164,7 @@ Publishing a GitHub release is the whole update flow; no server of ours ever hol
 ./gradlew :desktop:createDistributable    # the app with its own Java runtime, in desktop/build/compose/binaries
 ./gradlew :desktop:packageDeb             # or packageMsi / packageExe on Windows
 ./gradlew :desktop:syncCheck              # two simulated devices pair and sync through a local relay (see the task's comment)
+./gradlew :desktop:searchCheck            # search against a small library of titles, including dates and word order
 ./gradlew :desktop:render -Pshots="<data dir> <out dir> nosync wait:2500 first"   # draw it off-screen to a PNG
 ```
 

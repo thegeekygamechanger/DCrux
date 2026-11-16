@@ -1,5 +1,6 @@
 package app.dcrux.ui.settings
 
+import androidx.compose.material.icons.rounded.RateReview
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.ui.unit.em
 import androidx.compose.foundation.rememberScrollState
@@ -621,6 +622,10 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
 
             item("about") {
                 SettingsGroup("About") {
+                    if (g.cloud.available) Section(
+                        "Send feedback", Icons.Rounded.RateReview, "Report a problem or suggest something",
+                        openSection == "feedback", { openSection = if (openSection == "feedback") "" else "feedback" },
+                    ) { FeedbackPanel() }
                     SettingRow("About DCrux", "Developer, privacy, terms and licences", Icons.Rounded.Info) { nav.push(Screen.About) }
                 }
             }
@@ -666,6 +671,74 @@ fun SettingsScreen(settings: Settings, asTab: Boolean = false) {
  * Pairing this device with the person's others. One makes a code, the rest enter it; from then on
  * channels, video notes, questions, tests and study settings are the same everywhere.
  */
+/** The feedback form: what kind, the message, and an address for the reply. */
+@Composable
+private fun ColumnScope.FeedbackPanel() {
+    val g = LocalGraph.current
+    val scope = rememberCoroutineScope()
+    var kind by rememberSaveable { mutableStateOf("Problem") }
+    var message by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // Null until a message has gone; then the address it was sent with ("" when none was given).
+    var sentWith by rememberSaveable { mutableStateOf<String?>(null) }
+    val pad = Modifier.padding(horizontal = 22.dp)
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+
+    val sent = sentWith
+    if (sent != null) {
+        Column(pad.fillMaxWidth().padding(vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Rounded.CheckCircle, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary)
+            Text("Thank you. Your message is on its way.", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            Text(
+                if (sent.isNotEmpty()) "Please allow a few hours for a reply. It will come to $sent."
+                else "You did not leave an email address, so we cannot write back, but it will be read.",
+                Modifier.padding(top = 6.dp, bottom = 16.dp), style = MaterialTheme.typography.bodyMedium, color = quiet, textAlign = TextAlign.Center,
+            )
+            FilledTonalButton(onClick = { sentWith = null; message = ""; error = null }) { Text("Write another") }
+        }
+        return
+    }
+
+    Text("Found a problem, or want something added? Tell us. A person reads every message.", pad.padding(bottom = 12.dp), style = MaterialTheme.typography.bodyMedium, color = quiet)
+    Row(pad.padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("Problem", "Idea", "Other").forEach { k -> FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(k) }, shape = CircleShape) }
+    }
+    OutlinedTextField(
+        value = message, onValueChange = { message = it.take(app.dcrux.net.Feedback.MAX) }, modifier = pad.fillMaxWidth().heightIn(min = 150.dp),
+        shape = RoundedCornerShape(24.dp), enabled = !busy,
+        placeholder = { Text(if (kind == "Problem") "What happened, and what were you doing when it did?" else "What would you like?") },
+        supportingText = { Text("${message.length} / ${app.dcrux.net.Feedback.MAX}") },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
+    )
+    OutlinedTextField(
+        value = email, onValueChange = { email = it.take(254).trim() }, modifier = pad.fillMaxWidth().padding(top = 6.dp), singleLine = true,
+        shape = RoundedCornerShape(24.dp), enabled = !busy,
+        label = { Text("Your email, for the reply (optional)") },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email, autoCorrectEnabled = false),
+    )
+    error?.let { Text(it, pad.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    val ready = message.trim().length >= app.dcrux.net.Feedback.MIN
+    Button(
+        enabled = ready && !busy, modifier = pad.fillMaxWidth().padding(top = 12.dp).height(52.dp),
+        onClick = {
+            if (email.isNotEmpty() && !app.dcrux.net.Feedback.emailLooksRight(email)) { error = "That email address does not look right. Correct it, or clear it to send without one."; return@Button }
+            busy = true; error = null
+            scope.launch {
+                val problem = app.dcrux.net.Feedback.send(g, kind, message, email)
+                busy = false
+                if (problem == null) sentWith = email else error = problem
+            }
+        },
+    ) { Text(if (busy) "Sending" else "Send") }
+    Text(
+        if (ready) "Sent with it: the app version and whether this is a phone or a computer. Nothing else from the app."
+        else "Write at least ${app.dcrux.net.Feedback.MIN} characters.",
+        pad.padding(top = 8.dp, bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = quiet,
+    )
+}
+
 @Composable
 private fun ColumnScope.CloudPanel(cloud: app.dcrux.sync.CloudStatus) {
     val g = LocalGraph.current
