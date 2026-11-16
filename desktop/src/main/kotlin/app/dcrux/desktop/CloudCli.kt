@@ -1,5 +1,6 @@
 package app.dcrux.desktop
 
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -37,6 +38,13 @@ fun main(args: Array<String>) {
             "feedback" -> {
                 println("feedback: " + (app.dcrux.net.Feedback.send(g, args[2], args.drop(4).joinToString(" "), args[3].takeIf { it != "-" }.orEmpty()) ?: "sent"))
                 kotlin.system.exitProcess(0)
+            }
+            // What the screens see: the live list of channels, as it first arrives after a start. CloudCli <dir> watch
+            "watch" -> {
+                val began = System.currentTimeMillis()
+                val first = kotlinx.coroutines.withTimeoutOrNull(8000) { g.db.channels().observeAll().first() }
+                println("live channel list: " + (first?.map { it.title } ?: "NOTHING ARRIVED in 8 s") + " after ${System.currentTimeMillis() - began} ms")
+                kotlin.system.exitProcess(if (first == null) 1 else 0)
             }
             "sync" -> g.cloud.syncNow()
             // Ends sync for this code and erases the stored copy (after a test pairing).
