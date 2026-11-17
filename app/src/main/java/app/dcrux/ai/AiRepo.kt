@@ -4,6 +4,7 @@ import app.dcrux.Graph
 import app.dcrux.data.AppJson
 import app.dcrux.data.Ask
 import app.dcrux.data.Dates
+import app.dcrux.data.Settings
 import app.dcrux.data.ExamRelevance
 import app.dcrux.data.MainsCriterion
 import app.dcrux.data.MainsError
@@ -333,14 +334,27 @@ class AiRepo(private val g: Graph) {
     @Serializable
     private data class QuizOut(val questions: List<QuizItem> = emptyList())
 
-    /** Builds a test from the day's synced headlines (and any video summaries made that day). */
-    suspend fun generateQuiz(day: String, exam: String, difficulty: String, count: Int): List<QuizQuestion> {
-        val s = g.prefs.get()
+    /** The week's most relevant synced headlines and video notes: what a subject test may draw its current affairs from. */
+    private suspend fun weekOfItems(s: Settings): Pair<List<NewsItem>, List<Video>> {
         val sources = Sources.enabled(s).map { it.id }
-        val news = g.db.news().forDay(day, sources, 60)
-        val from = Dates.dayStart(day)
-        val videos = g.db.videos().summarisedBetween(from, from + 86_400_000L).take(4)
-        if (news.size + videos.size < 3) throw IllegalStateException("Not enough synced news for ${Dates.prettyDay(day)} yet. Refresh and try again.")
+        val news = g.db.news().recentDays().take(7).flatMap { g.db.news().forDay(it, sources, 30) }.take(160)
+        val now = System.currentTimeMillis()
+        return news to g.db.videos().summarisedBetween(now - 7 * 86_400_000L, now + 86_400_000L).take(4)
+    }
+
+    /**
+     * Builds a test. With no [subject] it is drawn from the day's synced headlines (and any video summaries made
+     * that day). With a subject, every question is on that subject: from the week's news where it touches the
+     * subject, and from the subject's standard syllabus for the rest (those say so as their source).
+     */
+    suspend fun generateQuiz(day: String, exam: String, difficulty: String, count: Int, subject: String = ""): List<QuizQuestion> {
+        val s = g.prefs.get()
+        val bySubject = subject.isNotBlank()
+        val (news, videos) = if (bySubject) weekOfItems(s) else {
+            val from = Dates.dayStart(day)
+            g.db.news().forDay(day, Sources.enabled(s).map { it.id }, 60) to g.db.videos().summarisedBetween(from, from + 86_400_000L).take(4)
+        }
+        if (!bySubject && news.size + videos.size < 3) throw IllegalStateException("Not enough synced news for ${Dates.prettyDay(day)} yet. Refresh and try again.")
         val style = when (difficulty) {
             "Easy" -> "Direct, single-fact questions a first-time reader of the news could answer."
             "Hard" -> "Exam-grade: multi-statement questions (\"Consider the following statements… Which of the above is/are correct?\"), " +
@@ -350,7 +364,11 @@ class AiRepo(private val g: Graph) {
         val user = buildString {
             append("Create ").append(count).append(" multiple-choice questions for the ").append(exam).append(" exam. Difficulty: ").append(difficulty).append(". ").append(style).append('\n')
             append("Rules:\n")
-            append("- Every question is anchored to exactly one item below; put that item's id in source_id.\n")
+            if (bySubject) {
+                append("- Subject: ").append(subject).append(". Every question belongs to this subject, as this exam's syllabus draws it.\n")
+                append("- Where an item below falls within the subject, anchor a question to it and put that item's id in source_id. Use the items for about half the questions when enough of them fit; never bend an item that does not belong to the subject.\n")
+                append("- Write the other questions from the subject's standard syllabus and put the word syllabus in source_id. For these use only settled, textbook-level facts (the text of the Constitution and of laws, standard school and reference texts); nothing recent, disputed or obscure, and no figure, date or name you are not certain of.\n")
+            } else append("- Every question is anchored to exactly one item below; put that item's id in source_id.\n")
             append("- Everything about the news itself must come from that item's text. You may connect it to well-established static syllabus knowledge (constitutional provisions, institutions, geography, basic economics) only where you are certain of it.\n")
             append("- Never ask for a detail the item does not give. If an item is too thin for a fair question, skip it.\n")
             append("- Exactly 4 options, exactly one correct; answer_index is 0-3. Spread the correct option across positions.\n")
@@ -379,7 +397,8 @@ class AiRepo(private val g: Graph) {
             QuizQuestion(
                 q = q.question.trim(), options = q.options.map { it.trim() }, answer = q.answer_index,
                 explanation = q.explanation.trim(), sourceId = q.source_id,
-                sourceTitle = n?.title ?: v?.title.orEmpty(), sourceLink = n?.link ?: v?.watchUrl.orEmpty(), topic = q.topic.trim(),
+                sourceTitle = n?.title ?: v?.title ?: if (bySubject) "Standard syllabus · $subject" else "",
+                sourceLink = n?.link ?: v?.watchUrl.orEmpty(), topic = q.topic.trim(),
                 relevance = q.relevance.coerceIn(-1, 100),
             )
         }
@@ -399,12 +418,12 @@ class AiRepo(private val g: Graph) {
     @Serializable
     private data class MainsOut(val questions: List<MainsItem> = emptyList())
 
-    /** Writes descriptive (Mains) questions from the day's synced headlines. */
-    suspend fun generateMains(day: String, exam: String, difficulty: String, count: Int, marks: Int): List<MainsQuestion> {
+    /** Writes descriptive (Mains) questions: from the day's synced headlines, or, with a [subject], on that subject (see [generateQuiz]). */
+    suspend fun generateMains(day: String, exam: String, difficulty: String, count: Int, marks: Int, subject: String = ""): List<MainsQuestion> {
         val s = g.prefs.get()
-        val sources = Sources.enabled(s).map { it.id }
-        val news = g.db.news().forDay(day, sources, 60)
-        if (news.size < 3) throw IllegalStateException("Not enough synced news for ${Dates.prettyDay(day)} yet. Pull down on Crux to sync and try again.")
+        val bySubject = subject.isNotBlank()
+        val news = if (bySubject) weekOfItems(s).first else g.db.news().forDay(day, Sources.enabled(s).map { it.id }, 60)
+        if (!bySubject && news.size < 3) throw IllegalStateException("Not enough synced news for ${Dates.prettyDay(day)} yet. Pull down on Crux to sync and try again.")
         val words = wordsFor(marks)
         val style = when (difficulty) {
             "Easy" -> "Straightforward: \"Discuss\", \"Explain\" or \"Describe\" one clear theme."
@@ -415,7 +434,13 @@ class AiRepo(private val g: Graph) {
             append("Write ").append(count).append(" descriptive (Mains) questions for the ").append(exam).append(" exam, each for ").append(marks)
             append(" marks with a limit of ").append(words).append(" words. Difficulty: ").append(difficulty).append(". ").append(style).append('\n')
             append("Rules:\n")
-            append("- Every question grows from exactly one item below; put that item's id in source_id. Pick the items that matter most for this exam's Mains syllabus and skip crime, sport results, celebrity and routine politics.\n")
+            if (bySubject) {
+                append("- Subject: ").append(subject).append(". Every question tests this subject, as this exam's Mains syllabus draws it.\n")
+                append("- Where an item below falls within the subject, let a question grow from it and put that item's id in source_id. Otherwise set the question on a core theme of the subject's standard syllabus, of the kind this exam asks, and put the word syllabus in source_id. Never bend an item that does not belong to the subject.\n")
+                append("- A question set from the syllabus states nothing that is not settled textbook knowledge.\n")
+            } else {
+                append("- Every question grows from exactly one item below; put that item's id in source_id. Pick the items that matter most for this exam's Mains syllabus and skip crime, sport results, celebrity and routine politics.\n")
+            }
             append("- Frame it the way that exam does: the news is the peg, the question tests the underlying syllabus theme (so a student who knows the subject can answer without having read the article). Do not ask for a detail only the article contains.\n")
             append("- Never state as fact in the question anything the item does not say.\n")
             append("- One directive word per question. demand: one line saying exactly what that directive requires here (for example \"Give both sides and reach a reasoned view\").\n")
@@ -437,7 +462,8 @@ class AiRepo(private val g: Graph) {
             val n = byId[q.source_id]
             MainsQuestion(
                 q = q.question.trim(), marks = marks, words = words, topic = q.topic.trim(), paper = q.paper.trim(), demand = q.demand.trim(),
-                relevance = q.relevance.coerceIn(-1, 100), sourceId = q.source_id, sourceTitle = n?.title.orEmpty(), sourceLink = n?.link.orEmpty(),
+                relevance = q.relevance.coerceIn(-1, 100), sourceId = q.source_id,
+                sourceTitle = n?.title ?: if (bySubject) "Standard syllabus · $subject" else "", sourceLink = n?.link.orEmpty(),
                 context = n?.let { listOf(it.title, it.snippet).filter { t -> t.isNotBlank() }.joinToString(". ").take(600) }.orEmpty(),
             )
         }
@@ -777,6 +803,12 @@ class AiRepo(private val g: Graph) {
         }
 
         /** How a single question's theme is scored for one exam; the same four parts as everywhere else in the app. */
+        /** The subjects a test can be set on, as the exams group them. Ethics is a Mains paper only. */
+        val SUBJECTS = listOf(
+            "Polity & Governance", "History & Culture", "Geography", "Economy", "Environment & Ecology",
+            "Science & Technology", "International Relations", "Society & Social Justice", "Internal Security", "Ethics",
+        )
+
         const val Q_SCORING =
             "Build it as: syllabus fit 0-40, likelihood that exam asks on this theme 0-30, depth of concept tested 0-20, currency 0-10; give the total only."
 

@@ -167,7 +167,7 @@ private fun SideBySide(gap: Dp, left: @Composable () -> Unit, right: @Composable
         val w = ((constraints.maxWidth - space) / 2).coerceAtLeast(0)
         val leftOwn = measurables[0].minIntrinsicHeight(w)
         val r = measurables[1].measure(Constraints(minWidth = w, maxWidth = w, minHeight = leftOwn))
-        val together = r.height <= leftOwn + 96.dp.roundToPx()
+        val together = r.height <= leftOwn + 170.dp.roundToPx()
         val l = measurables[0].measure(if (together) Constraints.fixed(w, r.height) else Constraints(minWidth = w, maxWidth = w, minHeight = leftOwn))
         layout(constraints.maxWidth, maxOf(l.height, r.height)) { l.place(0, 0); r.place(w + space, 0) }
     }
@@ -210,6 +210,8 @@ fun TestsTab(settings: Settings) {
     }
     var mains by rememberSaveable { mutableStateOf(false) }
     val results = remember(all, mains) { all.filter { it.second.isMains == mains } }
+    // Ethics is a Mains paper only.
+    val subjects = remember(mains) { AiRepo.SUBJECTS.filter { mains || it != "Ethics" } }
     val exams = remember(settings.exams) { settings.exams.toList().sortedByDescending { it == "UPSC CSE" } }
     var exam by rememberSaveable { mutableStateOf(exams.first()) }
     if (exam !in exams) exam = exams.first()
@@ -217,12 +219,15 @@ fun TestsTab(settings: Settings) {
     var day by rememberSaveable { mutableStateOf(Dates.dayKey()) }
     if (day !in days) day = days.first()
     var difficulty by rememberSaveable { mutableStateOf("Moderate") }
+    // "" is a test on everything in the day's news; otherwise one subject (see AiRepo.SUBJECTS).
+    var subject by rememberSaveable { mutableStateOf("") }
     var count by rememberSaveable { mutableIntStateOf(10) }
     var mainsCount by rememberSaveable { mutableIntStateOf(2) }
     var marks by rememberSaveable { mutableIntStateOf(10) }
     var busy by remember { mutableStateOf(false) }
     var buildJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var optionsOpen by rememberSaveable { mutableStateOf(false) }
+    if (subject.isNotEmpty() && subject !in subjects) subject = ""
     var error by remember { mutableStateOf<String?>(null) }
     // History lists every test, labelled by type; it has its own filter and order.
     var histFilter by rememberSaveable { mutableStateOf("All") }
@@ -305,8 +310,9 @@ fun TestsTab(settings: Settings) {
         CruxCard(m, color = MaterialTheme.colorScheme.surfaceContainer) {
             Column(Modifier.padding(18.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (busy) {
-                    if (mains) CruxLoader("Setting your Mains questions", "$mainsCount questions of $marks marks for ${shortExam(exam)}")
-                    else CruxLoader("Writing your test", "$count $difficulty questions for ${shortExam(exam)}")
+                    val on = if (subject.isEmpty()) "" else " on $subject"
+                    if (mains) CruxLoader("Setting your Mains questions", "$mainsCount questions of $marks marks for ${shortExam(exam)}$on")
+                    else CruxLoader("Writing your test", "$count $difficulty questions for ${shortExam(exam)}$on")
                     StopButton({ buildJob?.cancel(); busy = false }, Modifier.align(Alignment.CenterHorizontally))
                     return@Column
                 }
@@ -315,14 +321,25 @@ fun TestsTab(settings: Settings) {
                     "Write each answer on paper against the clock, photograph the pages, and get them read and marked like a mentor would.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // What the test is on: everything in the day's news, or one subject.
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = subject.isEmpty(), onClick = { subject = "" }, label = { Text("All subjects") }, shape = CircleShape)
+                    subjects.forEach { sub -> FilterChip(selected = subject == sub, onClick = { subject = sub }, label = { Text(sub) }, shape = CircleShape) }
+                }
+                if (subject.isNotEmpty()) Text(
+                    "On $subject only: from this week's news where it touches the subject, and from its standard syllabus for the rest.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 val turn by animateFloatAsState(if (optionsOpen) 180f else 0f, label = "options")
+                // A subject test spans the week, so it is named by its subject instead of a day.
+                val about = if (subject.isEmpty()) Dates.prettyDay(day) else subject
                 Row(
                     Modifier.fillMaxWidth().clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable { optionsOpen = !optionsOpen }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        if (mains) "${shortExam(exam)} · ${Dates.prettyDay(day)} · $difficulty · $mainsCount × $marks marks"
-                        else "${shortExam(exam)} · ${Dates.prettyDay(day)} · $difficulty · $count questions",
+                        if (mains) "${shortExam(exam)} · $about · $difficulty · $mainsCount × $marks marks"
+                        else "${shortExam(exam)} · $about · $difficulty · $count questions",
                         Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Icon(Icons.Rounded.ExpandMore, if (optionsOpen) "Hide options" else "Show options", Modifier.rotate(turn))
@@ -333,9 +350,12 @@ fun TestsTab(settings: Settings) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             exams.forEach { e -> FilterChip(selected = e == exam, onClick = { exam = e }, label = { Text(shortExam(e)) }, shape = CircleShape) }
                         }
-                        Text("News of", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            days.forEach { dk -> FilterChip(selected = dk == day, onClick = { day = dk }, label = { Text(Dates.prettyDay(dk)) }, shape = CircleShape) }
+                        // The day matters only for a test on the day's news.
+                        if (subject.isEmpty()) {
+                            Text("News of", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                days.forEach { dk -> FilterChip(selected = dk == day, onClick = { day = dk }, label = { Text(Dates.prettyDay(dk)) }, shape = CircleShape) }
+                            }
                         }
                         Text("Difficulty", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -373,13 +393,13 @@ fun TestsTab(settings: Settings) {
                     busy = true; error = null
                     buildJob = scope.launch {
                         try {
-                            val title = "${shortExam(exam)} · ${Dates.prettyDay(day)}"
+                            val title = "${shortExam(exam)} · $about"
                             if (mains) {
-                                val qs = g.ai.generateMains(day, exam, difficulty, mainsCount, marks)
+                                val qs = g.ai.generateMains(day, exam, difficulty, mainsCount, marks, subject)
                                 g.mains.start("$title · Mains", exam, difficulty, day, qs)
                                 nav.push(Screen.MainsRun)
                             } else {
-                                val qs = g.ai.generateQuiz(day, exam, difficulty, count)
+                                val qs = g.ai.generateQuiz(day, exam, difficulty, count, subject)
                                 nav.push(Screen.TestRun(title, exam, difficulty, day, qs))
                             }
                         } catch (e: ClaudeException) {

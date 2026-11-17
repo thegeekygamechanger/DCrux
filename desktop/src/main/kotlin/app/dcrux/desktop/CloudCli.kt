@@ -46,6 +46,26 @@ fun main(args: Array<String>) {
                 println("live channel list: " + (first?.map { it.title } ?: "NOTHING ARRIVED in 8 s") + " after ${System.currentTimeMillis() - began} ms")
                 kotlin.system.exitProcess(if (first == null) 1 else 0)
             }
+            // Writes a subject test as the app would and prints it: CloudCli <dir> quiz|mains <count> <subject...>
+            "quiz" -> {
+                val subject = args.drop(3).joinToString(" ")
+                g.ai.generateQuiz(app.dcrux.data.Dates.dayKey(), "UPSC CSE", "Moderate", args[2].toInt(), subject).forEachIndexed { i, q ->
+                    println("Q${i + 1} [${q.topic}] ${q.q.replace('\n', ' ')}")
+                    q.options.forEachIndexed { j, o -> println("   ${if (j == q.answer) "*" else " "} ${'A' + j}. $o") }
+                    println("   why: ${q.explanation.take(220)}")
+                    println("   source: ${q.sourceTitle.take(90)}${if (q.sourceLink.isBlank()) "" else " (link)"}")
+                }
+                kotlin.system.exitProcess(0)
+            }
+            "mains" -> {
+                val subject = args.drop(3).joinToString(" ")
+                g.ai.generateMains(app.dcrux.data.Dates.dayKey(), "UPSC CSE", "Moderate", args[2].toInt(), 10, subject).forEachIndexed { i, q ->
+                    println("Q${i + 1} [${q.paper} · ${q.topic}] ${q.q}")
+                    println("   demand: ${q.demand}")
+                    println("   source: ${q.sourceTitle.take(90)}${if (q.sourceLink.isBlank()) "" else " (link)"}")
+                }
+                kotlin.system.exitProcess(0)
+            }
             "sync" -> g.cloud.syncNow()
             // Ends sync for this code and erases the stored copy (after a test pairing).
             "erase" -> g.cloud.disable(eraseCloud = true)
