@@ -76,6 +76,29 @@ jobs:
           name: first-screen-${{ runner.os }}
           path: smoke-out/first.png
 
+      # After its first start the app writes itself a class archive, which later starts load from (StartArchive.kt).
+      # Here that same step is run by hand on this system, and the app is then started with the archive made
+      # compulsory. It reports; it does not stop a release, because the app works without the archive too.
+      - name: Check the class archive can be written and used
+        shell: bash
+        continue-on-error: true
+        run: |
+          EXE=$(find smoke -maxdepth 2 \( -name DCrux.exe -o -path '*/bin/DCrux' \) | head -1)
+          RES=$(dirname "$(find smoke -name classes.lst | head -1)")
+          LIST="$PWD/$RES/classes.lst"
+          if [ "$RUNNER_OS" = "Windows" ]; then LIST=$(cygpath -w "$LIST"); fi
+          JAVA_TOOL_OPTIONS="-Xshare:dump -XX:SharedClassListFile=\"$LIST\"" "$EXE" > archive.log 2>&1 || true
+          for i in $(seq 1 90); do [ -s "$RES/dcrux.jsa" ] && break; sleep 2; done
+          sleep 3
+          ls -la "$RES"
+          tail -3 archive.log || true
+          test -s "$RES/dcrux.jsa"
+          mkdir -p smoke-out2
+          JAVA_TOOL_OPTIONS="-Xshare:on" "$EXE" "$PWD/smoke-data" "$PWD/smoke-out2" nosync wait:1500 again || true
+          sleep 5
+          test -s smoke-out2/again.png
+          echo "Class archive: written and in use on $RUNNER_OS"
+
       - name: Make the installer
         shell: bash
         run: for t in ${{ matrix.task }}; do ./gradlew ":desktop:$t" --no-daemon; done

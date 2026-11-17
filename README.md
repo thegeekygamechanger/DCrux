@@ -36,6 +36,24 @@ It is the same app, compiled from the same source files as the phone app. A wide
 landscape layout (navigation rail, lists in columns, newspaper pages set like a broadsheet);
 made narrow, it becomes the phone layout.
 
+### Start-up and memory on a computer
+
+The computer app runs on a bundled Java runtime, tuned so it stays light (see `desktop/build.gradle.kts`):
+
+- The heap starts small and is handed back when it empties; memory the C library is holding is returned
+  every few seconds (Linux). The collector is the low-pause one, kept small.
+- Classes are loaded ready-made from an archive instead of being read and checked from the jars at every
+  start. The archive only works in the folder it was made in, so the app writes its own, once, in a
+  low-priority background step about half a minute after its first start in a new place or after an
+  update (`StartArchive.kt`). Where the app's folder cannot be written to, it simply starts the old way.
+- A start-up picture is shown by the launcher at once; the window appears when its first screen is ready
+  and fades in.
+
+Measured on a 6.7 GB laptop with a day of synced content: first frame in about 1.2 s instead of 2.5 s, and
+about 300 MB resident instead of 420 MB (the app's own memory about 140 MB instead of 300 MB). To measure:
+`DCRUX_TIMING=12 DCrux/bin/DCrux` prints the time to the first frame and the memory after 12 seconds, then
+closes; `DCRUX_TIMING=12f` also reports how evenly frames were drawn.
+
 ### Sync across your devices
 
 No account. In **Settings → Sync across devices** turn sync on: the sheet shows a QR code and,

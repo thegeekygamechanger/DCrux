@@ -15,7 +15,7 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-val appVersion = "1.4.5"
+val appVersion = "1.4.6"
 
 // Android-only files: each has a counterpart of the same name and package in this module, or is not needed here.
 val androidOnly = listOf(
@@ -98,6 +98,26 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "app.dcrux.desktop.MainKt"
+        // A lighter, quicker start (measured on Linux: about 420 MB down to about 290 MB, first frame in about
+        // 1.2 s instead of 2.5 s). Nothing here changes what the app does or how it draws:
+        // - The heap starts small, may grow to 512 MB, and is handed back when it empties. Left alone, the JVM
+        //   takes a slice of the machine's memory up front and lets the heap grow to a quarter of it.
+        // - The collector stays the default low-pause one (G1), with a small young area and two helper threads.
+        // - Memory the C library is holding but no longer using is returned every few seconds (Linux).
+        // - Classes come ready-made from an archive (resources/dcrux.jsa) instead of being read and checked from
+        //   the jars at every start. The archive only works in the folder it was made in, so the app writes its
+        //   own, once, in the background after its first start in a new place or after an update (see
+        //   StartArchive.kt). Until it exists, or if it does not match, the JVM starts the old way without a word.
+        //   It is mapped where it was written, so its pages are shared with the file.
+        jvmArgs += listOf(
+            "-Xms32m", "-Xmx512m", "-XX:MaxNewSize=32m", "-XX:MinHeapFreeRatio=10", "-XX:MaxHeapFreeRatio=20",
+            "-XX:G1PeriodicGCInterval=8000", "-XX:ParallelGCThreads=2", "-XX:ConcGCThreads=1",
+            "-XX:TrimNativeHeapInterval=5000",
+            "-XX:SharedArchiveFile=\$APPDIR/resources/dcrux.jsa", "-XX:+UnlockDiagnosticVMOptions", "-XX:ArchiveRelocationMode=0",
+            // Shown by the launcher the instant the app is started, before any of the app has loaded, and taken down
+            // by itself when the app's window appears (icons/splash.png, drawn by scripts/make_splash.py).
+            "-splash:\$APPDIR/resources/splash.png",
+        )
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Exe, TargetFormat.AppImage)
             packageName = "DCrux"
@@ -105,6 +125,9 @@ compose.desktop {
             description = "The daily crux of current affairs for UPSC and State PSC aspirants"
             vendor = "Harsh Kumar"
             licenseFile.set(rootProject.file("LICENSE"))
+            // Files placed beside the app in every kind of installer: the list of classes its archive is made from,
+            // and the start-up picture.
+            appResourcesRootDir.set(layout.buildDirectory.dir("cds-resources"))
             modules("java.sql", "java.desktop", "java.naming", "jdk.unsupported", "java.net.http", "jdk.crypto.ec")
             linux { shortcut = true; menuGroup = "Education"; iconFile.set(project.file("icons/icon.png")) }
             windows {
@@ -116,6 +139,49 @@ compose.desktop {
         }
     }
 }
+
+// ---- The class archive -------------------------------------------------------------------------
+// What ships is the list of classes to put in it (resources/classes.lst); the app makes the archive from that
+// list on the user's machine. The list is two lists joined: cds/classes.lst, recorded from a real start of the
+// app in its window (refresh it now and then: start the packaged app with
+// JAVA_TOOL_OPTIONS=-XX:DumpLoadedClassList=<file>, use it for a minute, close it), and a short off-screen tour
+// made at build time, which keeps up with classes added since. Names that no longer exist are skipped.
+val cdsDir = layout.buildDirectory.dir("cds")
+val cdsTour = tasks.register<JavaExec>("cdsTour") {
+    group = "build"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("app.dcrux.desktop.RenderKt")
+    val dir = cdsDir.get().asFile
+    // First screen, past the tour, Settings and its sync sheet, then Papers: the screens most people open first.
+    args = listOf(File(dir, "data").path, File(dir, "out").path, "nosync", "wait:1500", "134,1716", "wait:1200", "720,1760", "wait:1200", "480,1080", "wait:1200", "480,300", "wait:800", "312,1760", "wait:1500", "tour")
+    jvmArgs("-Djava.awt.headless=true", "-Drender.size=960x1840x2", "-Xmx512m", "-XX:DumpLoadedClassList=" + File(dir, "tour.lst").path)
+    isIgnoreExitValue = true
+    doFirst { dir.deleteRecursively(); dir.mkdirs() }
+}
+val classList = tasks.register("classList") {
+    group = "build"
+    dependsOn(cdsTour)
+    val recorded = file("cds/classes.lst")
+    val tour = cdsDir.map { it.file("tour.lst") }
+    val out = layout.buildDirectory.file("cds-resources/common/classes.lst")
+    // The start-up picture travels the same way, as a file beside the app.
+    val splash = file("icons/splash.png")
+    inputs.files(recorded, splash)
+    outputs.file(out)
+    doLast {
+        // Class names once each (the line numbers of a recording are dropped, since two recordings number
+        // differently), with the notes about lambdas, which refer to classes by name.
+        val seen = HashSet<String>()
+        val lines = listOf(recorded, tour.get().asFile).filter { it.exists() }.flatMap { it.readLines() }
+            .filter { it.isNotBlank() && !it.startsWith("#") }
+            .map { if (it.startsWith("@")) it else it.substringBefore(' ') }
+            .filter { seen.add(it) }
+        out.get().asFile.apply { parentFile.mkdirs() }.writeText(lines.joinToString("\n", postfix = "\n"))
+        splash.copyTo(File(out.get().asFile.parentFile, "splash.png"), overwrite = true)
+        logger.lifecycle("Class list: ${lines.count { !it.startsWith("@") }} classes")
+    }
+}
+tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(classList) }
 
 // Draws the app off-screen and saves pictures of it (see Render.kt): ./gradlew :desktop:render -Pshots="data out sync wait:3000 home"
 tasks.register<JavaExec>("render") {
