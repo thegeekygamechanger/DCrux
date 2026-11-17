@@ -49,6 +49,9 @@ object StartArchive {
         if (!resources.canWrite()) return note("folder cannot be written to")
         val launcher = ProcessHandle.current().info().command().orElse(null)?.let(::File)?.takeIf { it.isFile } ?: return note("launcher not found")
         stamp.delete()
+        // An archive left from before an update is no longer in use (the JVM turned it down at start). It is written
+        // read-only, which on Windows also stops it being replaced, so it is cleared out of the way first.
+        if (archive.exists()) { archive.setWritable(true); archive.delete() }
         val windows = System.getProperty("os.name").orEmpty().lowercase().contains("win")
         // The same program as this one, told to write the archive and stop: it never gets as far as opening a window.
         // It writes to the place this app is set up to read from (see jvmArgs in build.gradle.kts).
